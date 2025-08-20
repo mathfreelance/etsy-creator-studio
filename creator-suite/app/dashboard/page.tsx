@@ -24,6 +24,10 @@ export default function Page() {
       description: true,
       tags: true,
     },
+    enhance: {
+      enabled: false,
+      scale: 2,
+    },
   })
   const [isProcessing, setIsProcessing] = React.useState(false)
 
@@ -33,20 +37,25 @@ export default function Page() {
       return
     }
     setIsProcessing(true)
-    toast.info("Traitement en cours…")
     try {
-      const { blob, filename } = await processImage({
+      const promise = processImage({
         file: selectedImage,
         dpi: options.dpi,
         mockups: options.mockups,
         video: options.video,
         texts: options.texts.enabled,
+        enhance: options.enhance.enabled,
+        upscale: options.enhance.scale,
       })
+      toast.promise(promise, {
+        loading: "Traitement en cours…",
+        success: "Package ZIP téléchargé",
+        error: (err: any) => (typeof err?.message === "string" ? err.message : "Erreur pendant le traitement"),
+      })
+      const { blob, filename } = await promise
       downloadBlob(blob, filename || "package.zip")
-      toast.success("Package ZIP téléchargé")
     } catch (err: any) {
-      const msg = typeof err?.message === "string" ? err.message : "Erreur pendant le traitement"
-      toast.error(msg)
+      // toast.promise handles error display
     } finally {
       setIsProcessing(false)
     }
@@ -59,6 +68,7 @@ export default function Page() {
       mockups: true,
       video: false,
       texts: { enabled: true, title: true, alt: true, description: true, tags: true },
+      enhance: { enabled: false, scale: 2 },
     })
   }
 

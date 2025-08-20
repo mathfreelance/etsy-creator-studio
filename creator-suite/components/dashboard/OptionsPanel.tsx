@@ -20,6 +20,10 @@ export interface Options {
     description: boolean
     tags: boolean
   }
+  enhance: {
+    enabled: boolean
+    scale: 2 | 4
+  }
 }
 
 export interface OptionsPanelProps {
@@ -40,6 +44,9 @@ export function OptionsPanel({ hasImage, value, onChange, onContinue, onReset, l
   }
   function setTexts<K extends keyof Options["texts"]>(key: K, v: Options["texts"][K]) {
     onChange({ ...value, texts: { ...value.texts, [key]: v } })
+  }
+  function setEnhance<K extends keyof Options["enhance"]>(key: K, v: Options["enhance"][K]) {
+    onChange({ ...value, enhance: { ...value.enhance, [key]: v } })
   }
 
   return (
@@ -82,6 +89,27 @@ export function OptionsPanel({ hasImage, value, onChange, onContinue, onReset, l
             <p className="text-xs text-muted-foreground">Activer les métadonnées texte</p>
           </div>
           <Switch id="texts" checked={value.texts.enabled} onCheckedChange={(v) => setTexts("enabled", v)} />
+        </div>
+
+        <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+          <div className="space-y-0.5">
+            <Label htmlFor="enhance">Amélioration (Upscale)</Label>
+            <p className="text-xs text-muted-foreground">Améliorer la qualité avec un upscaler</p>
+          </div>
+          <Switch id="enhance" checked={value.enhance.enabled} onCheckedChange={(v) => setEnhance("enabled", v)} />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="upscale">Facteur</Label>
+          <Select value={String(value.enhance.scale)} onValueChange={(v) => setEnhance("scale", Number(v) as 2 | 4)}>
+            <SelectTrigger id="upscale" className="w-[180px]" disabled={!value.enhance.enabled}>
+              <SelectValue placeholder="Choisir" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="2">x2</SelectItem>
+              <SelectItem value="4">x4</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -133,3 +161,4 @@ export function OptionsPanel({ hasImage, value, onChange, onContinue, onReset, l
     </div>
   )
 }
+
