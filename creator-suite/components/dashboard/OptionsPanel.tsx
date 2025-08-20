@@ -28,9 +28,10 @@ export interface OptionsPanelProps {
   onChange: (next: Options) => void
   onContinue: () => void
   onReset: () => void
+  loading?: boolean
 }
 
-export function OptionsPanel({ hasImage, value, onChange, onContinue, onReset }: OptionsPanelProps) {
+export function OptionsPanel({ hasImage, value, onChange, onContinue, onReset, loading }: OptionsPanelProps) {
   function setDpi(next: DPI) {
     onChange({ ...value, dpi: next })
   }
@@ -125,8 +126,8 @@ export function OptionsPanel({ hasImage, value, onChange, onContinue, onReset }:
         <Button type="button" variant="ghost" onClick={onReset}>
           Réinitialiser
         </Button>
-        <Button type="button" onClick={onContinue} disabled={!hasImage}>
-          Continuer
+        <Button type="button" onClick={onContinue} disabled={!hasImage || Boolean(loading)}>
+          {loading ? "Traitement…" : "Continuer"}
         </Button>
       </div>
     </div>

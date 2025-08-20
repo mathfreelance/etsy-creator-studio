@@ -8,6 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Image as ImageIcon, Settings } from "lucide-react"
 import { ImageDropzone } from "@/components/dashboard/ImageDropzone"
 import { OptionsPanel, type Options } from "@/components/dashboard/OptionsPanel"
+import { processImage, downloadBlob } from "@/lib/api"
+import { toast } from "sonner"
 
 export default function Page() {
   const [selectedImage, setSelectedImage] = React.useState<File | null>(null)
@@ -23,11 +25,31 @@ export default function Page() {
       tags: true,
     },
   })
+  const [isProcessing, setIsProcessing] = React.useState(false)
 
-  function handleContinue() {
-    // Local only
-    // eslint-disable-next-line no-console
-    console.log({ selectedImage, options })
+  async function handleContinue() {
+    if (!selectedImage) {
+      toast.error("Aucune image sélectionnée")
+      return
+    }
+    setIsProcessing(true)
+    toast.info("Traitement en cours…")
+    try {
+      const { blob, filename } = await processImage({
+        file: selectedImage,
+        dpi: options.dpi,
+        mockups: options.mockups,
+        video: options.video,
+        texts: options.texts.enabled,
+      })
+      downloadBlob(blob, filename || "package.zip")
+      toast.success("Package ZIP téléchargé")
+    } catch (err: any) {
+      const msg = typeof err?.message === "string" ? err.message : "Erreur pendant le traitement"
+      toast.error(msg)
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   function handleReset() {
@@ -86,6 +108,7 @@ export default function Page() {
                     onChange={setOptions}
                     onContinue={handleContinue}
                     onReset={handleReset}
+                    loading={isProcessing}
                   />
                 </CardContent>
               </Card>
