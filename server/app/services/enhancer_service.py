@@ -1,0 +1,121 @@
+from __future__ import annotations
+from io import BytesIO
+from typing import Optional
+from PIL import Image
+import time
+import requests
+
+
+def ensure_dpi_bytes(image_bytes: bytes, dpi: int = 300, format_hint: Optional[str] = None) -> bytes:
+    """Force DPI metadata by re-encoding in-memory.
+    Defaults to PNG output to preserve quality and avoid JPEG loss unless
+    format_hint is provided ("PNG"/"JPEG"/...).
+    """
+    im = Image.open(BytesIO(image_bytes))
+    out = BytesIO()
+    fmt = (format_hint or im.format or "PNG").upper()
+    save_kwargs = {"dpi": (dpi, dpi)}
+    if fmt in {"JPG", "JPEG"}:
+        im = im.convert("RGB")
+        save_kwargs.update({"quality": 95, "subsampling": 0, "optimize": True, "progressive": True})
+        fmt = "JPEG"
+    im.save(out, fmt, **save_kwargs)
+    return out.getvalue()
+
+
+def enhance_image_bytes(image_bytes: bytes, scale: int = 2, dpi: int = 300) -> bytes:
+    """Upscale using ImgUpscaler (imglarger) API directly with in-memory bytes."""
+    if scale not in (2, 4):
+        raise ValueError("scale must be 2 or 4")
+
+    UPLOAD_URL = "https://get1.imglarger.com/api/UpscalerNew/UploadNew"
+    STATUS_URL = "https://get1.imglarger.com/api/UpscalerNew/CheckStatusNew"
+    DEFAULT_HEADERS = {
+        "Origin": "https://fr.imgupscaler.com",
+        "Referer": "https://fr.imgupscaler.com/",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    # Guess mime from bytes
+    try:
+        im = Image.open(BytesIO(image_bytes))
+        fmt = (im.format or "PNG").upper()
+    except Exception:
+        fmt = "PNG"
+    mime = "image/png" if fmt == "PNG" else ("image/jpeg" if fmt in {"JPG", "JPEG"} else "image/webp")
+
+    sess = requests.Session()
+    sess.headers.update(DEFAULT_HEADERS)
+
+    # 1) Upload
+    files = {"myfile": (f"input.{fmt.lower()}", image_bytes, mime)}
+    data = {"scaleRadio": str(scale)}
+    r = sess.post(UPLOAD_URL, files=files, data=data, timeout=60)
+    r.raise_for_status()
+    jr = r.json()
+    if jr.get("code") != 200 or "data" not in jr or "code" not in jr["data"]:
+        raise RuntimeError(f"Unexpected upload response: {jr}")
+    job_code = jr["data"]["code"]
+
+    # 2) Poll
+    start = time.time()
+    timeout = 300.0
+    poll_interval = 5.0
+    status = None
+    last_payload = None
+
+    def _check_status(sess: requests.Session, job_code: str, scale: int):
+        payload = {"code": job_code, "scaleRadio": str(scale)}
+        rr = sess.post(
+            STATUS_URL,
+            json=payload,
+            headers={"Content-Type": "application/json; charset=UTF-8"},
+            timeout=30,
+        )
+        if rr.status_code == 415:
+            rr = sess.post(
+                STATUS_URL,
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
+                timeout=30,
+            )
+        rr.raise_for_status()
+        return rr.json()
+
+    while time.time() - start < timeout:
+        pj = _check_status(sess, job_code, scale)
+        last_payload = pj
+        if pj.get("code") != 200 or "data" not in pj:
+            raise RuntimeError(f"Unexpected status payload: {pj}")
+        d = pj["data"]
+        status = d.get("status")
+        if status == "success":
+            urls = d.get("downloadUrls") or []
+            if not urls:
+                raise RuntimeError(f"No download URL in: {pj}")
+            download_url = urls[0]
+            dr = sess.get(download_url, stream=True, timeout=120)
+            dr.raise_for_status()
+            chunks = []
+            for chunk in dr.iter_content(chunk_size=1 << 16):
+                if chunk:
+                    chunks.append(chunk)
+            data = b"".join(chunks)
+            # Ensure requested DPI explicitly
+            if dpi:
+                data = ensure_dpi_bytes(data, dpi)
+            return data
+        elif status in {"waiting", "processing", "queued"}:
+            time.sleep(poll_interval)
+        elif status in {"failed", "error"}:
+            raise RuntimeError(f"Upscale task failed: {pj}")
+        else:
+            time.sleep(poll_interval)
+
+    raise RuntimeError(f"Upscale timeout after {timeout}s. Last status: {status} // payload: {last_payload}")
