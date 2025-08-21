@@ -24,6 +24,19 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
       .catch(() => toast.error("Impossible de copier"))
   }
 
+  const downloadUrl = (url: string, filename?: string) => {
+    try {
+      const a = document.createElement('a')
+      a.href = url
+      if (filename) a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    } catch {
+      toast.error("Téléchargement impossible")
+    }
+  }
+
   return (
     <Card className="rounded-2xl">
       <CardHeader className="flex md:flex-row items-start md:items-center justify-between gap-2">
@@ -43,7 +56,20 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <ImageIcon className="size-4" /> Image améliorée
             </div>
-            <img src={data.processedImageUrl} alt="Processed" className="w-full rounded-lg border" />
+            <div className="relative group">
+              <img src={data.processedImageUrl} alt="Processed" className="w-full rounded-lg border" />
+              <div className="pointer-events-none absolute top-2 right-2 hidden group-hover:block">
+                <Button
+                  aria-label="Télécharger l'image améliorée"
+                  className="pointer-events-auto h-8 w-8 p-0 rounded-full shadow"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => downloadUrl(data.processedImageUrl!, 'processed.png')}
+                >
+                  <Download className="size-4" />
+                </Button>
+              </div>
+            </div>
           </section>
         )}
 
@@ -55,7 +81,20 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               {data.mockups.map((m, i) => (
                 <div key={i} className="space-y-1">
-                  <img src={m.url} alt={m.name} className="w-full rounded-lg border" />
+                  <div className="relative group">
+                    <img src={m.url} alt={m.name} className="w-full rounded-lg border" />
+                    <div className="pointer-events-none absolute top-2 right-2 hidden group-hover:block">
+                      <Button
+                        aria-label="Télécharger ce mockup"
+                        className="pointer-events-auto h-8 w-8 p-0 rounded-full shadow"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => downloadUrl(m.url, m.name || `mockup-${i + 1}.png`)}
+                      >
+                        <Download className="size-4" />
+                      </Button>
+                    </div>
+                  </div>
                   <div className="text-xs text-muted-foreground truncate">{m.name}</div>
                 </div>
               ))}
@@ -68,9 +107,22 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Film className="size-4" /> Vidéo
             </div>
-            <video controls className="w-full rounded-lg border">
-              <source src={data.videoUrl} type="video/mp4" />
-            </video>
+            <div className="relative group">
+              <video controls className="w-full rounded-lg border">
+                <source src={data.videoUrl} type="video/mp4" />
+              </video>
+              <div className="pointer-events-none absolute top-2 right-2 hidden group-hover:block">
+                <Button
+                  aria-label="Télécharger la vidéo"
+                  className="pointer-events-auto h-8 w-8 p-0 rounded-full shadow"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => downloadUrl(data.videoUrl!, 'preview.mp4')}
+                >
+                  <Download className="size-4" />
+                </Button>
+              </div>
+            </div>
           </section>
         )}
 
@@ -127,9 +179,21 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
                 </Button>
               </div>
               <div className="flex flex-wrap gap-2">
-                {data.texts.tags.split(',').map((t, i) => (
-                  <Badge key={i} variant="secondary">{t.trim()}</Badge>
-                ))}
+                {data.texts.tags
+                  .split(',')
+                  .map((t) => t.trim())
+                  .filter(Boolean)
+                  .map((t, i) => (
+                    <Badge
+                      key={i}
+                      variant="secondary"
+                      className="cursor-pointer select-none hover:bg-white/10"
+                      title="Cliquer pour copier ce tag"
+                      onClick={() => copy(t)}
+                    >
+                      {t}
+                    </Badge>
+                  ))}
               </div>
             </div>
           </section>
