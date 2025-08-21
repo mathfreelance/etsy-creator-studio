@@ -9,6 +9,8 @@ import { Image as ImageIcon, Settings } from "lucide-react"
 import { ImageDropzone } from "@/components/dashboard/ImageDropzone"
 import { OptionsPanel, type Options } from "@/components/dashboard/OptionsPanel"
 import { processImage, downloadBlob } from "@/lib/api"
+import { ResultsPanel } from "@/components/dashboard/ResultsPanel"
+import { parseProcessZip, type ParsedPackage } from "@/lib/zip"
 import { toast } from "sonner"
 
 export default function Page() {
@@ -30,6 +32,14 @@ export default function Page() {
     },
   })
   const [isProcessing, setIsProcessing] = React.useState(false)
+  const [results, setResults] = React.useState<ParsedPackage | null>(null)
+  const [zipBlob, setZipBlob] = React.useState<Blob | null>(null)
+  const [zipFilename, setZipFilename] = React.useState<string | undefined>(undefined)
+  React.useEffect(() => {
+    return () => {
+      try { results?.release() } catch {}
+    }
+  }, [results])
 
   async function handleContinue() {
     if (!selectedImage) {
@@ -38,6 +48,14 @@ export default function Page() {
     }
     setIsProcessing(true)
     try {
+      // Cleanup previous preview to avoid leaking object URLs
+      if (results) {
+        try { results.release() } catch {}
+      }
+      setResults(null)
+      setZipBlob(null)
+      setZipFilename(undefined)
+
       const promise = processImage({
         file: selectedImage,
         dpi: options.dpi,
@@ -49,11 +67,14 @@ export default function Page() {
       })
       toast.promise(promise, {
         loading: "Traitement en cours…",
-        success: "Package ZIP téléchargé",
+        success: "Traitement terminé",
         error: (err: any) => (typeof err?.message === "string" ? err.message : "Erreur pendant le traitement"),
       })
       const { blob, filename } = await promise
-      downloadBlob(blob, filename || "package.zip")
+      const parsed = await parseProcessZip(blob)
+      setResults(parsed)
+      setZipBlob(blob)
+      setZipFilename(filename)
     } catch (err: any) {
       // toast.promise handles error display
     } finally {
@@ -62,6 +83,9 @@ export default function Page() {
   }
 
   function handleReset() {
+    if (results) {
+      try { results.release() } catch {}
+    }
     setSelectedImage(null)
     setOptions({
       dpi: 300,
@@ -70,6 +94,9 @@ export default function Page() {
       texts: { enabled: true, title: true, alt: true, description: true, tags: true },
       enhance: { enabled: false, scale: 2 },
     })
+    setResults(null)
+    setZipBlob(null)
+    setZipFilename(undefined)
   }
 
   return (
@@ -123,6 +150,14 @@ export default function Page() {
                 </CardContent>
               </Card>
             </div>
+
+            {results && (
+              <ResultsPanel
+                data={results}
+                filename={zipFilename}
+                onDownload={zipBlob ? () => downloadBlob(zipBlob, zipFilename || "package.zip") : undefined}
+              />
+            )}
           </div>
         </div>
       </SidebarInset>
