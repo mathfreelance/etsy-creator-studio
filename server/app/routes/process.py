@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Set, AsyncGenerator
 from io import BytesIO
 import os
 import json
@@ -18,6 +18,66 @@ from ..utils.zipper import build_zip_bytes
 router = APIRouter(tags=["process"])
 logger = logging.getLogger("uvicorn.error")
 
+# In-memory progress channels keyed by request id (rid)
+_PROG_CHANNELS: Dict[str, Set[asyncio.Queue]] = {}
+_PROG_LOCK = asyncio.Lock()
+
+async def _push_progress(rid: str | None, payload: Dict[str, Any]) -> None:
+    """Push a progress payload to all SSE subscribers for the given rid."""
+    if not rid:
+        return
+    try:
+        async with _PROG_LOCK:
+            queues = _PROG_CHANNELS.get(rid)
+            if not queues:
+                return
+            for q in list(queues):
+                try:
+                    q.put_nowait(payload)
+                except Exception:
+                    pass
+    except Exception:
+        # Never let progress push break processing
+        pass
+
+@router.get("/process/stream")
+async def process_stream(rid: str | None = None):
+    """Server-Sent Events endpoint streaming progress for a given request id (rid)."""
+    if not rid:
+        raise HTTPException(status_code=400, detail="rid is required")
+
+    async def gen() -> AsyncGenerator[str, None]:
+        q: asyncio.Queue = asyncio.Queue()
+        async with _PROG_LOCK:
+            subs = _PROG_CHANNELS.setdefault(rid, set())
+            subs.add(q)
+        try:
+            # Initial hello
+            yield f"data: {json.dumps({'event': 'connected'})}\n\n"
+            while True:
+                try:
+                    item = await asyncio.wait_for(q.get(), timeout=15)
+                    yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+                    if isinstance(item, dict) and item.get("event") in {"done", "error"}:
+                        break
+                except asyncio.TimeoutError:
+                    # Keep-alive comment per SSE spec
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            async with _PROG_LOCK:
+                subs = _PROG_CHANNELS.get(rid)
+                if subs and q in subs:
+                    subs.remove(q)
+                if subs is not None and len(subs) == 0:
+                    _PROG_CHANNELS.pop(rid, None)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+    })
+
 @router.post("/process")
 async def process(
     image: UploadFile = File(...),
@@ -27,6 +87,7 @@ async def process(
     mockups: bool = Form(False),
     video: bool = Form(False),
     texts: bool = Form(False),
+    rid: str | None = Form(None),
 ):
     """Process an uploaded image and return a ZIP package.
 
@@ -44,6 +105,7 @@ async def process(
     raw = await image.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Empty image upload")
+    await _push_progress(rid, {"event": "started"})
 
     files: List[Tuple[str, bytes]] = []
     manifest: Dict[str, Any] = {
@@ -68,6 +130,7 @@ async def process(
             raise HTTPException(status_code=400, detail="OPENAI_API_KEY not configured")
         logger.info("[process] starting text generation (from raw input)…")
         texts_task = asyncio.create_task(asyncio.to_thread(generate_texts, raw))
+        await _push_progress(rid, {"event": "step", "step": "texts", "status": "started"})
 
     # 1) Enhance / ensure DPI
     try:
@@ -76,10 +139,12 @@ async def process(
             processed = await asyncio.to_thread(enhance_image_bytes, raw, upscale, dpi)
             manifest["generated"].append({"type": "enhanced_image"})
             logger.info(f"[process] enhance x{upscale} done in {time.perf_counter()-t0:.2f}s")
+            await _push_progress(rid, {"event": "step", "step": "image", "status": "done", "mode": "enhance", "scale": upscale})
         else:
             processed = await asyncio.to_thread(ensure_dpi_bytes, raw, dpi)
             manifest["generated"].append({"type": "dpi_image"})
             logger.info(f"[process] ensure_dpi({dpi}) done in {time.perf_counter()-t0:.2f}s")
+            await _push_progress(rid, {"event": "step", "step": "image", "status": "done", "mode": "dpi", "dpi": dpi})
 
         # Normalize to PNG with requested DPI for consistency in the ZIP
         t1 = time.perf_counter()
@@ -121,8 +186,10 @@ async def process(
                 mockup_bytes.append(bytes_)
             manifest["generated"].append({"type": "mockups", "count": len(mocks)})
             logger.info(f"[process] mockups generated ({len(mocks)}) in {time.perf_counter()-t_m:.2f}s")
+            await _push_progress(rid, {"event": "step", "step": "mockups", "status": "done", "count": len(mocks)})
         except Exception as e:
             logger.exception("[process] Mockups failed")
+            await _push_progress(rid, {"event": "error", "step": "mockups", "detail": str(e)})
             raise HTTPException(status_code=500, detail=f"Mockups failed: {e}")
 
     # 3) Video (after mockups)
@@ -134,8 +201,10 @@ async def process(
             files.append(("video/preview.mp4", mp4))
             manifest["generated"].append({"type": "video"})
             logger.info(f"[process] video generated in {time.perf_counter()-t_v:.2f}s")
+            await _push_progress(rid, {"event": "step", "step": "video", "status": "done"})
         except Exception as e:
             logger.exception("[process] Video failed")
+            await _push_progress(rid, {"event": "error", "step": "video", "detail": str(e)})
             raise HTTPException(status_code=500, detail=f"Video failed: {e}")
 
     # 4) Texts (await if started)
@@ -149,8 +218,10 @@ async def process(
             ))
             manifest["generated"].append({"type": "texts", "fields": [k for k in payload.keys()]})
             logger.info(f"[process] texts generated fields={list(payload.keys())} in {time.perf_counter()-t_t:.2f}s")
+            await _push_progress(rid, {"event": "step", "step": "texts", "status": "done", "fields": list(payload.keys())})
         except Exception as e:
             logger.exception("[process] Texts failed")
+            await _push_progress(rid, {"event": "error", "step": "texts", "detail": str(e)})
             raise HTTPException(status_code=500, detail=f"Texts failed: {e}")
 
     # 5) Manifest
@@ -160,8 +231,11 @@ async def process(
     ))
 
     t_zip = time.perf_counter()
+    await _push_progress(rid, {"event": "step", "step": "zip", "status": "started"})
     zip_bytes = await asyncio.to_thread(build_zip_bytes, files)
     logger.info(f"[process] zip built with {len(files)} files in {time.perf_counter()-t_zip:.2f}s; total={time.perf_counter()-t_start:.2f}s")
+    await _push_progress(rid, {"event": "step", "step": "zip", "status": "done", "files": len(files)})
+    await _push_progress(rid, {"event": "done"})
 
     return StreamingResponse(iter([zip_bytes]), media_type="application/zip", headers={
         "Content-Disposition": "attachment; filename=package.zip"

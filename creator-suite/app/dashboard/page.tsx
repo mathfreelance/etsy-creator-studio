@@ -10,6 +10,7 @@ import { ImageDropzone } from "@/components/dashboard/ImageDropzone"
 import { OptionsPanel, type Options } from "@/components/dashboard/OptionsPanel"
 import { processImage, downloadBlob } from "@/lib/api"
 import { ResultsPanel } from "@/components/dashboard/ResultsPanel"
+import { ProgressPanel, type StepKey } from "@/components/dashboard/ProgressPanel"
 import { parseProcessZip, type ParsedPackage } from "@/lib/zip"
 import { toast } from "sonner"
 
@@ -41,6 +42,72 @@ export default function Page() {
     }
   }, [results])
 
+  // Progress (SSE)
+  const [rid, setRid] = React.useState<string | null>(null)
+  const esRef = React.useRef<EventSource | null>(null)
+  const [stepOrder, setStepOrder] = React.useState<StepKey[]>([])
+  const [stepStatus, setStepStatus] = React.useState<Record<string, 'pending' | 'started' | 'done'>>({})
+
+  React.useEffect(() => {
+    return () => {
+      if (esRef.current) {
+        try { esRef.current.close() } catch {}
+        esRef.current = null
+      }
+    }
+  }, [])
+
+  function computeSteps(opts: Options): StepKey[] {
+    const arr: StepKey[] = ["image"]
+    if (opts.mockups) arr.push("mockups")
+    if (opts.video) arr.push("video")
+    if (opts.texts.enabled) arr.push("texts")
+    arr.push("zip")
+    return arr
+  }
+
+  function startProgress(newRid: string, opts: Options) {
+    // Close previous stream if any
+    if (esRef.current) {
+      try { esRef.current.close() } catch {}
+      esRef.current = null
+    }
+    const steps = computeSteps(opts)
+    setStepOrder(steps)
+    const init: Record<string, 'pending' | 'started' | 'done'> = {}
+    for (const s of steps) init[s] = 'pending'
+    setStepStatus(init)
+
+    const es = new EventSource(`/api/process/stream?rid=${encodeURIComponent(newRid)}`)
+    esRef.current = es
+
+    es.onmessage = (e) => {
+      try {
+        const payload = JSON.parse(e.data)
+        if (payload.event === 'step' && payload.step && payload.status) {
+          setStepStatus(prev => ({ ...prev, [payload.step]: payload.status }))
+        } else if (payload.event === 'done') {
+          // Mark any remaining steps as done
+          setStepStatus(prev => {
+            const next = { ...prev }
+            for (const s of steps) if (next[s] !== 'done') next[s] = 'done'
+            return next
+          })
+          try { es.close() } catch {}
+        } else if (payload.event === 'error') {
+          toast.error(`Erreur étape ${payload.step || ''}`.trim())
+          try { es.close() } catch {}
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+
+    es.onerror = () => {
+      // Silent; the main request still runs; avoid spamming toasts
+    }
+  }
+
   async function handleContinue() {
     if (!selectedImage) {
       toast.error("Aucune image sélectionnée")
@@ -56,6 +123,13 @@ export default function Page() {
       setZipBlob(null)
       setZipFilename(undefined)
 
+      // Progress: new rid and start SSE
+      const newRid = (globalThis.crypto && 'randomUUID' in globalThis.crypto)
+        ? (globalThis.crypto as any).randomUUID()
+        : Math.random().toString(36).slice(2)
+      setRid(newRid)
+      startProgress(newRid, options)
+
       const promise = processImage({
         file: selectedImage,
         dpi: options.dpi,
@@ -64,6 +138,7 @@ export default function Page() {
         texts: options.texts.enabled,
         enhance: options.enhance.enabled,
         upscale: options.enhance.scale,
+        rid: newRid,
       })
       toast.promise(promise, {
         loading: "Traitement en cours…",
@@ -86,6 +161,10 @@ export default function Page() {
     if (results) {
       try { results.release() } catch {}
     }
+    if (esRef.current) {
+      try { esRef.current.close() } catch {}
+      esRef.current = null
+    }
     setSelectedImage(null)
     setOptions({
       dpi: 300,
@@ -97,6 +176,9 @@ export default function Page() {
     setResults(null)
     setZipBlob(null)
     setZipFilename(undefined)
+    setRid(null)
+    setStepOrder([])
+    setStepStatus({})
   }
 
   return (
@@ -150,6 +232,10 @@ export default function Page() {
                 </CardContent>
               </Card>
             </div>
+
+            {stepOrder.length > 0 && (
+              <ProgressPanel steps={stepOrder} status={stepStatus} />
+            )}
 
             {results && (
               <ResultsPanel

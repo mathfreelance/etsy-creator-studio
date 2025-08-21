@@ -42,12 +42,26 @@ def enhance_image_bytes(image_bytes: bytes, scale: int = 2, dpi: int = 300) -> b
         "X-Requested-With": "XMLHttpRequest",
     }
 
-    # Guess mime from bytes
+    # Guess mime from bytes and normalize unsupported formats for the upstream service
     try:
         im = Image.open(BytesIO(image_bytes))
         fmt = (im.format or "PNG").upper()
     except Exception:
         fmt = "PNG"
+
+    # The upstream upscaler endpoint rejects WEBP (returns code 999). Convert to PNG first.
+    if fmt not in {"PNG", "JPG", "JPEG"}:
+        try:
+            im = Image.open(BytesIO(image_bytes))
+            out_norm = BytesIO()
+            # Preserve alpha if present; PNG supports transparency
+            im.save(out_norm, "PNG")
+            image_bytes = out_norm.getvalue()
+            fmt = "PNG"
+        except Exception:
+            # If normalization fails, fall back to labeling as PNG to maximize compatibility
+            fmt = "PNG"
+
     mime = "image/png" if fmt == "PNG" else ("image/jpeg" if fmt in {"JPG", "JPEG"} else "image/webp")
 
     sess = requests.Session()

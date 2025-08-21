@@ -6,6 +6,7 @@ export type ProcessParams = {
   texts: boolean
   enhance?: boolean
   upscale?: 2 | 4
+  rid?: string
 }
 
 export type ProcessResult = {
@@ -14,7 +15,7 @@ export type ProcessResult = {
 }
 
 export async function processImage(params: ProcessParams): Promise<ProcessResult> {
-  const { file, dpi, mockups, video, texts, enhance = false, upscale = 2 } = params
+  const { file, dpi, mockups, video, texts, enhance = false, upscale = 2, rid } = params
 
   const fd = new FormData()
   fd.append('image', file)
@@ -24,6 +25,7 @@ export async function processImage(params: ProcessParams): Promise<ProcessResult
   fd.append('mockups', String(mockups))
   fd.append('video', String(video))
   fd.append('texts', String(texts))
+  if (rid) fd.append('rid', rid)
 
   // Call Next.js proxy route to avoid CORS and hide backend URL
   const res = await fetch(`/api/process`, {
