@@ -5,6 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Download, Image as ImageIcon, Images, Film, FileText, Copy } from "lucide-react"
 import type { ParsedPackage } from "@/lib/zip"
 import { toast } from "sonner"
@@ -16,6 +18,38 @@ export interface ResultsPanelProps {
 }
 
 export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) {
+  const [etsyConnected, setEtsyConnected] = React.useState<boolean>(false)
+  const [creating, setCreating] = React.useState<boolean>(false)
+  const [price, setPrice] = React.useState<string>("5.00")
+  const [quantity, setQuantity] = React.useState<string>("10")
+  const [taxonomyId, setTaxonomyId] = React.useState<string>("2078")
+  const [shopId, setShopId] = React.useState<string>("61611464")
+
+  React.useEffect(() => {
+    try {
+      const v = localStorage.getItem("etsy_connected")
+      setEtsyConnected(v === "true")
+    } catch {}
+    ;(async () => {
+      try {
+        const r = await fetch("/api/etsy/auth/status")
+        if (r.ok) {
+          const j = await r.json()
+          setEtsyConnected(!!j?.connected)
+          try { localStorage.setItem("etsy_connected", j?.connected ? "true" : "false") } catch {}
+        }
+      } catch {}
+    })()
+    const onMsg = (ev: MessageEvent) => {
+      if (ev?.data?.type === "etsyConnected") {
+        try { localStorage.setItem("etsy_connected", "true") } catch {}
+        setEtsyConnected(true)
+      }
+    }
+    window.addEventListener("message", onMsg)
+    return () => window.removeEventListener("message", onMsg)
+  }, [])
+
   const copy = (text: string) => {
     if (!navigator.clipboard) return
     navigator.clipboard
@@ -34,6 +68,105 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
       a.remove()
     } catch {
       toast.error("Téléchargement impossible")
+    }
+  }
+
+  function openSettings() {
+    try { window.dispatchEvent(new Event('open-settings')) } catch {}
+  }
+
+  async function connectEtsy() {
+    openSettings()
+  }
+
+  async function createEtsyDraft() {
+    if (!data.processedImageUrl) {
+      toast.error("Aucune image traitée disponible")
+      return
+    }
+    // Ensure we are connected before proceeding
+    try {
+      const r = await fetch("/api/etsy/auth/status")
+      if (!r.ok) throw new Error()
+      const j = await r.json()
+      if (!j?.connected) {
+        try { localStorage.setItem("etsy_connected", "false") } catch {}
+        setEtsyConnected(false)
+        toast.error("Authentification Etsy requise. Ouvre les paramètres pour te connecter.")
+        openSettings()
+        return
+      }
+    } catch {}
+    setCreating(true)
+    try {
+      const blob = await fetch(data.processedImageUrl).then((r) => r.blob())
+      if (blob.size > 20 * 1024 * 1024) {
+        toast.error("Le fichier digital dépasse 20 Mo")
+        return
+      }
+      const fd = new FormData()
+      fd.append("processed", new File([blob], "processed.png", { type: "image/png" }))
+      // Use the same image as listing image by default
+      fd.append("image", new File([blob], "image.png", { type: "image/png" }))
+
+      const texts = data.texts
+      if (texts?.title) fd.append("title", texts.title)
+      if (texts?.description) fd.append("description", texts.description)
+      if (texts?.tags) fd.append("tags", texts.tags)
+      if (texts?.alt_seo) fd.append("alt_seo", texts.alt_seo)
+
+      fd.append("price", Number(price || 0).toFixed(2))
+      fd.append("quantity", String(Math.max(1, Number(quantity || 1))))
+      fd.append("taxonomy_id", taxonomyId)
+      fd.append("shop_id", shopId)
+
+      // Optional: explicit attributes override (server has defaults too)
+      fd.append("orientation", "vertical")
+      fd.append("pieces_included", "1")
+
+      // Attach mockup images if available (as repeated `mockups` fields)
+      if (data.mockups?.length) {
+        for (let i = 0; i < data.mockups.length; i++) {
+          const m = data.mockups[i]
+          try {
+            const mb = await fetch(m.url).then((r) => r.blob())
+            if (mb && mb.size > 0) {
+              const name = m.name || `mockup-${i + 1}.png`
+              fd.append("mockups", new File([mb], name, { type: mb.type || "image/png" }))
+            }
+          } catch {}
+        }
+      }
+
+      // Attach video preview if available
+      if (data.videoUrl) {
+        try {
+          const vb = await fetch(data.videoUrl).then((r) => r.blob())
+          if (vb && vb.size > 0) {
+            fd.append("video", new File([vb], "preview.mp4", { type: vb.type || "video/mp4" }))
+          }
+        } catch {}
+      }
+
+      const resp = await fetch("/api/etsy/listings/draft", { method: "POST", body: fd })
+      const json = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        if (resp.status === 401) {
+          try { localStorage.setItem("etsy_connected", "false") } catch {}
+          setEtsyConnected(false)
+          toast.error("Authentification Etsy requise. Ouvre les paramètres pour te connecter.")
+          openSettings()
+          return
+        }
+        throw new Error(json?.detail || "Création du draft Etsy a échoué")
+      }
+      const id = json?.listing_id || json?.listing?.listing_id
+      const sku = json?.sku
+      toast.success(`Draft Etsy créé (ID ${id || "?"}${sku ? `, SKU ${sku}` : ""})`)
+    } catch (e: any) {
+      toast.error(e?.message || "Erreur inconnue")
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -198,7 +331,44 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
             </div>
           </section>
         )}
+
+        {/* Etsy integration */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="font-medium">Etsy</div>
+            <div className={`text-xs ${etsyConnected ? "text-green-600" : "text-muted-foreground"}`}>
+              {etsyConnected ? "Connecté" : "Non connecté"}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="price">Prix (EUR)</Label>
+              <Input id="price" value={price} onChange={(e) => setPrice(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="qty">Quantité</Label>
+              <Input id="qty" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="taxo">Taxonomy ID</Label>
+              <Input id="taxo" value={taxonomyId} onChange={(e) => setTaxonomyId(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="shop">Shop ID</Label>
+              <Input id="shop" value={shopId} onChange={(e) => setShopId(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={connectEtsy}>
+              {etsyConnected ? "Reconnecter Etsy" : "Connecter Etsy"}
+            </Button>
+            <Button onClick={createEtsyDraft} disabled={creating || !data.processedImageUrl}>
+              {creating ? "Création…" : "Créer un draft Etsy"}
+            </Button>
+          </div>
+        </section>
       </CardContent>
     </Card>
   )
 }
+

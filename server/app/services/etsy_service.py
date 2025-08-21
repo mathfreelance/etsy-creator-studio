@@ -1,0 +1,363 @@
+import os
+import time
+import base64
+import hashlib
+import secrets
+from typing import Dict, Optional, Tuple, List
+
+import requests
+
+ETSY_API_BASE = "https://openapi.etsy.com/v3/application"
+ETSY_AUTH_URL = "https://www.etsy.com/oauth/connect"
+ETSY_TOKEN_URL = "https://api.etsy.com/v3/public/oauth/token"
+
+# In-memory token store (single-user/dev). Replace with persistent store for multi-user.
+_token_store: Dict[str, object] = {
+    # "access_token": str,
+    # "refresh_token": str,
+    # "expires_at": int,  # epoch seconds
+}
+
+# In-memory PKCE cache: state -> code_verifier
+_pkce_cache: Dict[str, str] = {}
+
+
+def _env(name: str, default: Optional[str] = None) -> str:
+    v = os.getenv(name, default)
+    if v is None:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return v
+
+
+def generate_pkce_pair() -> Tuple[str, str, str]:
+    """Return (state, code_verifier, code_challenge) and cache verifier by state."""
+    state = secrets.token_urlsafe(16)
+    code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(40)).decode("utf-8").rstrip("=")
+    sha256 = hashlib.sha256(code_verifier.encode("utf-8")).digest()
+    code_challenge = base64.urlsafe_b64encode(sha256).decode("utf-8").rstrip("=")
+    _pkce_cache[state] = code_verifier
+    return state, code_verifier, code_challenge
+
+
+def pop_code_verifier(state: str) -> Optional[str]:
+    return _pkce_cache.pop(state, None)
+
+
+def build_auth_url(redirect_uri: Optional[str] = None, scopes: Optional[str] = None, use_pkce: bool = True) -> Tuple[str, Optional[str]]:
+    """Build the Etsy OAuth authorization URL. Returns (url, state) when PKCE is used; otherwise (url, None)."""
+    client_id = _env("ETSY_CLIENT_ID", _env("ETSY_API_KEY", ""))
+    redirect = redirect_uri or _env("ETSY_REDIRECT_URI")
+    scope_str = scopes or _env("ETSY_SCOPES", "listings_r listings_w shops_r")
+
+    params = {
+        "response_type": "code",
+        "redirect_uri": redirect,
+        "scope": scope_str,
+        "client_id": client_id,
+    }
+
+    if use_pkce:
+        state, _verifier, challenge = generate_pkce_pair()
+        params["state"] = state
+        params["code_challenge"] = challenge
+        params["code_challenge_method"] = "S256"
+        return f"{ETSY_AUTH_URL}?" + requests.compat.urlencode(params), state
+    else:
+        return f"{ETSY_AUTH_URL}?" + requests.compat.urlencode(params), None
+
+
+def _save_tokens(data: Dict[str, object]) -> None:
+    # data typically contains: access_token, refresh_token, expires_in
+    _token_store["access_token"] = data.get("access_token")
+    if data.get("refresh_token"):
+        _token_store["refresh_token"] = data.get("refresh_token")
+    # expires_in is seconds from now
+    expires_in = int(data.get("expires_in", 3600))
+    _token_store["expires_at"] = int(time.time()) + max(expires_in - 60, 300)  # refresh 1 min early
+
+
+def has_tokens() -> bool:
+    return bool(_token_store.get("access_token") or _token_store.get("refresh_token"))
+
+
+def exchange_code_for_token(code: str, code_verifier: Optional[str]) -> Dict[str, object]:
+    client_id = _env("ETSY_CLIENT_ID", _env("ETSY_API_KEY", ""))
+    client_secret = os.getenv("ETSY_CLIENT_SECRET")
+    redirect_uri = _env("ETSY_REDIRECT_URI")
+
+    data = {
+        "grant_type": "authorization_code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "code": code,
+    }
+    # Prefer PKCE if verifier provided
+    if code_verifier:
+        data["code_verifier"] = code_verifier
+    # Include client_secret when available (confidential app)
+    if client_secret:
+        data["client_secret"] = client_secret
+
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    resp = requests.post(ETSY_TOKEN_URL, data=data, headers=headers, timeout=30)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Token exchange failed: {resp.status_code} {resp.text}")
+    tokens = resp.json()
+    _save_tokens(tokens)
+    return tokens
+
+
+def _refresh_token_if_needed() -> None:
+    access_token = _token_store.get("access_token")
+    expires_at = _token_store.get("expires_at", 0)
+    now = int(time.time())
+    if access_token and now < int(expires_at):
+        return
+    # refresh
+    refresh_token = _token_store.get("refresh_token")
+    if not refresh_token:
+        # no refresh token available
+        _token_store.clear()
+        return
+
+    client_id = _env("ETSY_CLIENT_ID", _env("ETSY_API_KEY", ""))
+    client_secret = os.getenv("ETSY_CLIENT_SECRET")
+
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": client_id,
+        "refresh_token": refresh_token,
+    }
+    if client_secret:
+        data["client_secret"] = client_secret
+
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    resp = requests.post(ETSY_TOKEN_URL, data=data, headers=headers, timeout=30)
+    if resp.status_code >= 400:
+        _token_store.clear()
+        raise RuntimeError(f"Token refresh failed: {resp.status_code} {resp.text}")
+    tokens = resp.json()
+    _save_tokens(tokens)
+
+
+def get_auth_headers() -> Dict[str, str]:
+    _refresh_token_if_needed()
+    access = _token_store.get("access_token")
+    if not access:
+        raise PermissionError("NOT_AUTHENTICATED")
+    api_key = _env("ETSY_CLIENT_ID", _env("ETSY_API_KEY", ""))
+    return {
+        "Authorization": f"Bearer {access}",
+        "x-api-key": api_key,
+    }
+
+
+def create_draft_listing(*, title: str, description: str, tags: str, price: str, quantity: str, taxonomy_id: str, who_made: str = "i_did", when_made: str = "2020_2025", materials: Optional[str] = None, shop_id: Optional[str] = None) -> Dict[str, object]:
+    headers = get_auth_headers().copy()
+    headers["Content-Type"] = "application/x-www-form-urlencoded"
+
+    sid = shop_id or _env("ETSY_SHOP_ID")
+    tid = taxonomy_id or _env("ETSY_TAXONOMY_ID")
+
+    # Build as list of tuples to support repeated fields (e.g., materials[])
+    form_items = [
+        ("quantity", quantity),
+        ("title", title),
+        ("description", description),
+        ("price", price),
+        ("who_made", who_made),
+        ("when_made", when_made),
+        ("taxonomy_id", tid),
+        ("tags", tags),  # comma-separated
+        ("type", "download"),
+        ("is_digital", "true"),
+    ]
+    if materials:
+        # Accept comma-separated materials and send as repeated fields (array)
+        mats = [m.strip() for m in materials.split(",") if m.strip()]
+        for m in mats:
+            form_items.append(("materials[]", m))
+
+    url = f"{ETSY_API_BASE}/shops/{sid}/listings"
+    resp = requests.post(url, headers=headers, data=form_items, timeout=60)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"createDraftListing failed: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def upload_listing_image(listing_id: int, image_bytes: bytes, filename: str, shop_id: Optional[str] = None, rank: int = 1, content_type: str = "image/png", alt_text: Optional[str] = None) -> Dict[str, object]:
+    headers = get_auth_headers().copy()
+    sid = shop_id or _env("ETSY_SHOP_ID")
+    url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}/images"
+    files = {
+        "image": (filename, image_bytes, content_type or "image/png"),
+    }
+    data = {"rank": str(rank)}
+    if alt_text:
+        # Etsy max length 500
+        data["alt_text"] = alt_text[:500]
+    resp = requests.post(url, headers=headers, files=files, data=data, timeout=60)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"uploadListingImage failed: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def upload_listing_file(listing_id: int, file_bytes: bytes, filename: str, shop_id: Optional[str] = None) -> Dict[str, object]:
+    headers = get_auth_headers().copy()
+    sid = shop_id or _env("ETSY_SHOP_ID")
+    url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}/files"
+    files = {
+        "file": (filename, file_bytes, "image/png"),
+    }
+    # Etsy requires a user-facing name for the digital file
+    data = {"name": filename}
+    resp = requests.post(url, headers=headers, files=files, data=data, timeout=60)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"uploadListingFile failed: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def upload_listing_video(listing_id: int, video_bytes: bytes, filename: str, shop_id: Optional[str] = None) -> Dict[str, object]:
+    headers = get_auth_headers().copy()
+    sid = shop_id or _env("ETSY_SHOP_ID")
+    url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}/videos"
+    files = {
+        "video": (filename, video_bytes, "video/mp4"),
+    }
+    data = {"name": filename}
+    resp = requests.post(url, headers=headers, files=files, data=data, timeout=120)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"uploadListingVideo failed: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def ensure_download_type(listing_id: int, shop_id: Optional[str] = None) -> None:
+    headers = get_auth_headers().copy()
+    headers["Content-Type"] = "application/x-www-form-urlencoded"
+    sid = shop_id or _env("ETSY_SHOP_ID")
+    url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}"
+    data = {
+        "type": "download",
+        "is_digital": "true",
+    }
+    resp = requests.patch(url, headers=headers, data=data, timeout=30)
+    if resp.status_code >= 400:
+        # Some accounts may not require this; don't fail hard
+        pass
+
+
+def get_properties_by_taxonomy_id(taxonomy_id: str) -> Dict[str, object]:
+    headers = get_auth_headers().copy()
+    sid = _env("ETSY_SHOP_ID")  # not needed for this call but keep for consistency
+    url = f"{ETSY_API_BASE}/seller-taxonomy/nodes/{taxonomy_id}/properties"
+    resp = requests.get(url, headers=headers, timeout=30)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"getPropertiesByTaxonomyId failed: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def update_listing_property(listing_id: int, property_id: int, values: List[str], shop_id: Optional[str] = None) -> Dict[str, object]:
+    headers = get_auth_headers().copy()
+    headers["Content-Type"] = "application/x-www-form-urlencoded"
+    sid = shop_id or _env("ETSY_SHOP_ID")
+    url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}/properties/{property_id}"
+    # Send values as repeated fields
+    data = [("values", v) for v in values]
+    resp = requests.put(url, headers=headers, data=data, timeout=30)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"updateListingProperty failed: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def apply_orientation_and_pieces(listing_id: int, taxonomy_id: str, orientation: str = "vertical", pieces_included: str = "1", shop_id: Optional[str] = None) -> None:
+    try:
+        props = get_properties_by_taxonomy_id(taxonomy_id)
+        items = props if isinstance(props, list) else props.get("results") or props.get("data") or []
+        orientation_prop_id = None
+        orientation_value_id = None
+        pieces_prop_id = None
+        pieces_value_id = None
+
+        # Normalize
+        want_orientation = (orientation or "").strip().lower()
+        want_pieces = (pieces_included or "1").strip()
+
+        for p in items:
+            name = (p.get("name") or p.get("property_name") or "").strip().lower()
+            pid = p.get("property_id") or p.get("id")
+            vals = p.get("possible_values") or p.get("values") or []
+            if not pid:
+                continue
+            if "orientation" in name and orientation_prop_id is None:
+                orientation_prop_id = int(pid)
+                for v in vals:
+                    vname = (v.get("name") or v.get("value_name") or "").strip().lower()
+                    vid = v.get("value_id") or v.get("id")
+                    if not vid:
+                        continue
+                    if want_orientation in vname:
+                        orientation_value_id = str(vid)
+                        break
+            if ("pieces" in name or "number of pieces" in name) and pieces_prop_id is None:
+                pieces_prop_id = int(pid)
+                for v in vals:
+                    vname = (v.get("name") or v.get("value_name") or "").strip().lower()
+                    vid = v.get("value_id") or v.get("id")
+                    if not vid:
+                        continue
+                    if vname.startswith(want_pieces):
+                        pieces_value_id = str(vid)
+                        break
+
+        if orientation_prop_id and orientation_value_id:
+            update_listing_property(listing_id, orientation_prop_id, [orientation_value_id], shop_id)
+        if pieces_prop_id and pieces_value_id:
+            update_listing_property(listing_id, pieces_prop_id, [pieces_value_id], shop_id)
+    except Exception:
+        # Non-fatal; properties vary by taxonomy and account
+        pass
+
+
+def update_listing_inventory(listing_id: int, price: str, quantity: str, sku: str, currency_code: str = "EUR", shop_id: Optional[str] = None) -> Dict[str, object]:
+    headers = get_auth_headers().copy()
+    headers["Content-Type"] = "application/json"
+    sid = shop_id or _env("ETSY_SHOP_ID")
+    url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}/inventory"
+    # Minimal single-product inventory with one offering
+    body = {
+        "products": [
+            {
+                "sku": sku,
+                "property_values": [],
+                "offerings": [
+                    {
+                        "price": price,
+                        "quantity": int(quantity),
+                        "is_enabled": True,
+                        "currency_code": currency_code,
+                    }
+                ],
+            }
+        ]
+    }
+    resp = requests.put(url, headers=headers, json=body, timeout=30)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"updateListingInventory failed: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def get_defaults() -> Dict[str, str]:
+    return {
+        "shop_id": os.getenv("ETSY_SHOP_ID", ""),
+        "taxonomy_id": os.getenv("ETSY_TAXONOMY_ID", ""),
+        "price": os.getenv("ETSY_DEFAULT_PRICE", "5.00"),
+        "quantity": os.getenv("ETSY_DEFAULT_QUANTITY", "10"),
+        # Default materials fallback if env not set
+        "materials": os.getenv(
+            "ETSY_MATERIALS",
+            "A3, A4, A5, Digital Download, High Resolution JPG, Printable File, Instant Download, Printable Poster",
+        ),
+        "orientation": os.getenv("ETSY_ORIENTATION", "vertical"),
+        "pieces_included": os.getenv("ETSY_PIECES_INCLUDED", "1"),
+        "currency_code": os.getenv("CURRENCY_CODE", "EUR"),
+    }

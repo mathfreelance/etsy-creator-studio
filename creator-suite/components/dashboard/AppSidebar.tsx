@@ -32,6 +32,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { SettingsDialog } from "@/components/dashboard/SettingsDialog"
 
 const data = {
   user: {
@@ -151,6 +153,16 @@ const data = {
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const [settingsOpen, setSettingsOpen] = React.useState(false)
+
+  React.useEffect(() => {
+    const handler = () => setSettingsOpen(true)
+    window.addEventListener("open-settings", handler)
+    return () => {
+      window.removeEventListener("open-settings", handler)
+    }
+  }, [])
+
   return (
     <Sidebar collapsible="offcanvas" {...props}>
       <SidebarHeader>
@@ -171,11 +183,25 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarContent>
         <NavMain items={data.navMain} />
         {/* <NavDocuments items={data.documents} /> */}
-        <NavSecondary items={data.navSecondary} className="mt-auto" />
+        <NavSecondary
+          items={data.navSecondary}
+          className="mt-auto"
+          onItemClick={(item) => {
+            if (item.title === "Settings") setSettingsOpen(true)
+          }}
+        />
       </SidebarContent>
       {/* <SidebarFooter>
         <NavUser user={data.user} />
       </SidebarFooter> */}
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Paramètres</DialogTitle>
+          </DialogHeader>
+          <SettingsDialog />
+        </DialogContent>
+      </Dialog>
     </Sidebar>
   )
 }

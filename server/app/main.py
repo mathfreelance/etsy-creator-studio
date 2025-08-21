@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import os
 
 from .routes.process import router as process_router
+from .routes.etsy import router as etsy_router
 
 load_dotenv()
 
@@ -21,3 +22,4 @@ app.add_middleware(
 )
 
 app.include_router(process_router, prefix="/api")
+app.include_router(etsy_router, prefix="/api")
