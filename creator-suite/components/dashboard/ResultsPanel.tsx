@@ -22,8 +22,6 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
   const [creating, setCreating] = React.useState<boolean>(false)
   const [price, setPrice] = React.useState<string>("5.00")
   const [quantity, setQuantity] = React.useState<string>("10")
-  const [taxonomyId, setTaxonomyId] = React.useState<string>("2078")
-  const [shopId, setShopId] = React.useState<string>("61611464")
 
   React.useEffect(() => {
     try {
@@ -116,8 +114,6 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
 
       fd.append("price", Number(price || 0).toFixed(2))
       fd.append("quantity", String(Math.max(1, Number(quantity || 1))))
-      fd.append("taxonomy_id", taxonomyId)
-      fd.append("shop_id", shopId)
 
       // Optional: explicit attributes override (server has defaults too)
       fd.append("orientation", "vertical")
@@ -346,7 +342,7 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
               {etsyConnected ? "Connecté" : "Non connecté"}
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="price">Prix (EUR)</Label>
               <Input id="price" value={price} onChange={(e) => setPrice(e.target.value)} />
@@ -354,14 +350,6 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
             <div className="space-y-1">
               <Label htmlFor="qty">Quantité</Label>
               <Input id="qty" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="taxo">Taxonomy ID</Label>
-              <Input id="taxo" value={taxonomyId} onChange={(e) => setTaxonomyId(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="shop">Shop ID</Label>
-              <Input id="shop" value={shopId} onChange={(e) => setShopId(e.target.value)} />
             </div>
           </div>
           <div className="flex gap-2">

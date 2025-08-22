@@ -5,22 +5,36 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export function SettingsDialog() {
   const [connected, setConnected] = React.useState<boolean>(false)
-  const [checking, setChecking] = React.useState<boolean>(false)
+  const [checking, setChecking] = React.useState<boolean>(true)
+  const [loadingPrefs, setLoadingPrefs] = React.useState<boolean>(true)
+  const [savingPrefs, setSavingPrefs] = React.useState<boolean>(false)
+  const [shopId, setShopId] = React.useState<string>("")
+  const [taxonomyId, setTaxonomyId] = React.useState<string>("")
 
   React.useEffect(() => {
     checkStatus()
+    loadPrefs()
     const onMsg = (ev: MessageEvent) => {
       if (ev?.data?.type === "etsyConnected") {
         try { localStorage.setItem("etsy_connected", "true") } catch {}
         setConnected(true)
-        toast.success("Etsy connecté ✅")
+        toast.success("Etsy connecté")
       }
     }
     window.addEventListener("message", onMsg)
-    return () => window.removeEventListener("message", onMsg)
+    // Reload when dialog is opened via global event
+    const onOpen = () => { checkStatus(); loadPrefs() }
+    window.addEventListener("open-settings", onOpen as any)
+    return () => {
+      window.removeEventListener("message", onMsg)
+      window.removeEventListener("open-settings", onOpen as any)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -37,6 +51,42 @@ export function SettingsDialog() {
       // ignore
     } finally {
       setChecking(false)
+    }
+  }
+
+  async function loadPrefs() {
+    setLoadingPrefs(true)
+    try {
+      const r = await fetch("/api/etsy/prefs")
+      if (r.ok) {
+        const j = await r.json()
+        if (typeof j?.shop_id === "string") setShopId(j.shop_id)
+        if (typeof j?.taxonomy_id === "string") setTaxonomyId(j.taxonomy_id)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingPrefs(false)
+    }
+  }
+
+  async function savePrefs() {
+    setSavingPrefs(true)
+    try {
+      const r = await fetch("/api/etsy/prefs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ shop_id: shopId, taxonomy_id: taxonomyId }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j?.detail || "Échec de l'enregistrement")
+      }
+      toast.success("Préférences enregistrées")
+    } catch (e: any) {
+      toast.error(typeof e?.message === "string" ? e.message : "Erreur inconnue")
+    } finally {
+      setSavingPrefs(false)
     }
   }
 
@@ -66,23 +116,84 @@ export function SettingsDialog() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <div className="text-base font-medium">Connexion Etsy</div>
-          <div className="text-xs text-muted-foreground">Connecte ta boutique pour créer des drafts automatiquement.</div>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <div className="text-base font-medium">Connexion Etsy</div>
+            <div className="text-xs text-muted-foreground">Connecte ta boutique pour créer des drafts automatiquement.</div>
+          </div>
+          {checking ? (
+            <Skeleton className="h-6 w-28 rounded-full" />
+          ) : (
+            <Badge variant={connected ? "default" : "secondary"} className={connected ? "bg-green-600" : ""}>
+              {connected ? "Connecté" : "Non connecté"}
+            </Badge>
+          )}
         </div>
-        <Badge variant={connected ? "default" : "secondary"} className={connected ? "bg-green-600" : ""}>
-          {connected ? "Connecté" : "Non connecté"}
-        </Badge>
+        <div className="flex gap-2">
+          {checking ? (
+            <>
+              <Skeleton className="h-9 w-40" />
+              <Skeleton className="h-9 w-40" />
+            </>
+          ) : (
+            <>
+              <Button onClick={connectEtsy} variant="secondary">
+                {connected ? "Reconnecter Etsy" : "Connecter Etsy"}
+              </Button>
+              <Button onClick={checkStatus} disabled={checking}>
+                {checking ? "Vérification…" : "Vérifier le statut"}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
+
       <Separator />
-      <div className="flex gap-2">
-        <Button onClick={connectEtsy} variant="secondary">
-          {connected ? "Reconnecter Etsy" : "Connecter Etsy"}
-        </Button>
-        <Button onClick={checkStatus} disabled={checking}>
-          {checking ? "Vérification…" : "Vérifier le statut"}
-        </Button>
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <div className="text-base font-medium">Préférences Etsy</div>
+          <div className="text-xs text-muted-foreground">Configure tes préférences Etsy pour que l'auto-digitalisation fonctionne correctement.</div>
+        </div>
+        {loadingPrefs ? (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-9 w-full" />
+              </div>
+              <div className="space-y-1">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-9 w-full" />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Skeleton className="h-9 w-28" />
+              <Skeleton className="h-9 w-32" />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="shop">Shop ID</Label>
+                <Input id="shop" value={shopId} onChange={(e) => setShopId(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="taxo">Taxonomy ID</Label>
+                <Input id="taxo" value={taxonomyId} onChange={(e) => setTaxonomyId(e.target.value)} />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={loadPrefs} variant="secondary">
+                Recharger
+              </Button>
+              <Button onClick={savePrefs} disabled={savingPrefs}>
+                {savingPrefs ? "Enregistrement…" : "Enregistrer"}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

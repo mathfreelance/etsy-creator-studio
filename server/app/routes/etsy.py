@@ -69,6 +69,33 @@ def etsy_auth_status():
         return {"connected": False}
 
 
+@router.get("/prefs")
+def get_prefs():
+    """Return saved Etsy preferences (shop_id, taxonomy_id) from JSON store only.
+
+    No .env fallback. If not set, values are empty strings.
+    """
+    try:
+        return etsy.get_prefs()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/prefs")
+async def set_prefs(request: Request):
+    """Update and persist Etsy preferences. Accepts JSON body with shop_id and/or taxonomy_id."""
+    try:
+        data = await request.json()
+        shop_id = (data or {}).get("shop_id")
+        taxonomy_id = (data or {}).get("taxonomy_id")
+        saved = etsy.set_prefs(shop_id=shop_id, taxonomy_id=taxonomy_id)
+        return saved
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/listings/draft")
 async def create_draft_listing(request: Request):
     """Create an Etsy draft listing, upload media, and attach the digital file.
@@ -129,12 +156,14 @@ async def create_draft_listing(request: Request):
         if len(digital_bytes) > 20 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="Digital file exceeds 20 MB limit")
 
-        # Defaults from env
+        # Defaults: uses persisted prefs for IDs; price/quantity from defaults
         defaults = etsy.get_defaults()
         price = price or defaults["price"]
         quantity = quantity or defaults["quantity"]
         taxonomy_id = taxonomy_id or defaults["taxonomy_id"]
         shop_id = shop_id or defaults["shop_id"]
+        if not taxonomy_id or not shop_id:
+            raise HTTPException(status_code=400, detail="shop_id ou taxonomy_id manquant. Configure-les dans les Préférences (POST /etsy/prefs).")
         # Merge provided materials with defaults (deduplicated)
         mats_default = [m.strip() for m in (defaults.get("materials") or "").split(",") if m.strip()]
         mats_user = [m.strip() for m in (materials or "").split(",") if m.strip()]

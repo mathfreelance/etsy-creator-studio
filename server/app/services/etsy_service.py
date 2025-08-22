@@ -182,12 +182,42 @@ def get_auth_headers() -> Dict[str, str]:
     }
 
 
+def get_prefs() -> Dict[str, str]:
+    """Return user preferences (shop_id, taxonomy_id) from the JSON token store only.
+
+    No environment fallback. If not present in the store, values are empty strings.
+    """
+    return {
+        "shop_id": str(_token_store.get("shop_id") or ""),
+        "taxonomy_id": str(_token_store.get("taxonomy_id") or ""),
+    }
+
+
+def set_prefs(shop_id: Optional[str] = None, taxonomy_id: Optional[str] = None) -> Dict[str, str]:
+    """Persist preferences into the same JSON file as tokens."""
+    changed = False
+    if shop_id is not None and str(shop_id).strip():
+        _token_store["shop_id"] = str(shop_id).strip()
+        changed = True
+    if taxonomy_id is not None and str(taxonomy_id).strip():
+        _token_store["taxonomy_id"] = str(taxonomy_id).strip()
+        changed = True
+    if changed:
+        _persist_tokens(_token_store)
+    return get_prefs()
+
+
 def create_draft_listing(*, title: str, description: str, tags: str, price: str, quantity: str, taxonomy_id: str, who_made: str = "i_did", when_made: str = "2020_2025", materials: Optional[str] = None, shop_id: Optional[str] = None) -> Dict[str, object]:
     headers = get_auth_headers().copy()
     headers["Content-Type"] = "application/x-www-form-urlencoded"
 
-    sid = shop_id or _env("ETSY_SHOP_ID")
-    tid = taxonomy_id or _env("ETSY_TAXONOMY_ID")
+    # No env fallback for IDs: must be provided/persisted
+    sid = shop_id or ""
+    tid = taxonomy_id or ""
+    if not sid:
+        raise RuntimeError("Missing shop_id. Configure preferences via /etsy/prefs.")
+    if not tid:
+        raise RuntimeError("Missing taxonomy_id. Configure preferences via /etsy/prefs.")
 
     # Build as list of tuples to support repeated fields (e.g., materials[])
     form_items = [
@@ -217,7 +247,9 @@ def create_draft_listing(*, title: str, description: str, tags: str, price: str,
 
 def upload_listing_image(listing_id: int, image_bytes: bytes, filename: str, shop_id: Optional[str] = None, rank: int = 1, content_type: str = "image/png", alt_text: Optional[str] = None) -> Dict[str, object]:
     headers = get_auth_headers().copy()
-    sid = shop_id or _env("ETSY_SHOP_ID")
+    sid = shop_id or ""
+    if not sid:
+        raise RuntimeError("Missing shop_id for upload_listing_image")
     url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}/images"
     files = {
         "image": (filename, image_bytes, content_type or "image/png"),
@@ -234,7 +266,9 @@ def upload_listing_image(listing_id: int, image_bytes: bytes, filename: str, sho
 
 def upload_listing_file(listing_id: int, file_bytes: bytes, filename: str, shop_id: Optional[str] = None) -> Dict[str, object]:
     headers = get_auth_headers().copy()
-    sid = shop_id or _env("ETSY_SHOP_ID")
+    sid = shop_id or ""
+    if not sid:
+        raise RuntimeError("Missing shop_id for upload_listing_file")
     url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}/files"
     files = {
         "file": (filename, file_bytes, "image/png"),
@@ -249,7 +283,9 @@ def upload_listing_file(listing_id: int, file_bytes: bytes, filename: str, shop_
 
 def upload_listing_video(listing_id: int, video_bytes: bytes, filename: str, shop_id: Optional[str] = None) -> Dict[str, object]:
     headers = get_auth_headers().copy()
-    sid = shop_id or _env("ETSY_SHOP_ID")
+    sid = shop_id or ""
+    if not sid:
+        raise RuntimeError("Missing shop_id for upload_listing_video")
     url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}/videos"
     files = {
         "video": (filename, video_bytes, "video/mp4"),
@@ -264,7 +300,9 @@ def upload_listing_video(listing_id: int, video_bytes: bytes, filename: str, sho
 def ensure_download_type(listing_id: int, shop_id: Optional[str] = None) -> None:
     headers = get_auth_headers().copy()
     headers["Content-Type"] = "application/x-www-form-urlencoded"
-    sid = shop_id or _env("ETSY_SHOP_ID")
+    sid = shop_id or ""
+    if not sid:
+        raise RuntimeError("Missing shop_id for ensure_download_type")
     url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}"
     data = {
         "type": "download",
@@ -278,7 +316,6 @@ def ensure_download_type(listing_id: int, shop_id: Optional[str] = None) -> None
 
 def get_properties_by_taxonomy_id(taxonomy_id: str) -> Dict[str, object]:
     headers = get_auth_headers().copy()
-    sid = _env("ETSY_SHOP_ID")  # not needed for this call but keep for consistency
     url = f"{ETSY_API_BASE}/seller-taxonomy/nodes/{taxonomy_id}/properties"
     resp = requests.get(url, headers=headers, timeout=30)
     if resp.status_code >= 400:
@@ -351,7 +388,9 @@ def apply_orientation_and_pieces(listing_id: int, taxonomy_id: str, orientation:
 def update_listing_inventory(listing_id: int, price: str, quantity: str, sku: str, currency_code: str = "EUR", shop_id: Optional[str] = None) -> Dict[str, object]:
     headers = get_auth_headers().copy()
     headers["Content-Type"] = "application/json"
-    sid = shop_id or _env("ETSY_SHOP_ID")
+    sid = shop_id or ""
+    if not sid:
+        raise RuntimeError("Missing shop_id for update_listing_inventory")
     url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}/inventory"
     # Minimal single-product inventory with one offering
     body = {
@@ -377,9 +416,10 @@ def update_listing_inventory(listing_id: int, price: str, quantity: str, sku: st
 
 
 def get_defaults() -> Dict[str, str]:
+    prefs = get_prefs()
     return {
-        "shop_id": os.getenv("ETSY_SHOP_ID", ""),
-        "taxonomy_id": os.getenv("ETSY_TAXONOMY_ID", ""),
+        "shop_id": prefs.get("shop_id", ""),
+        "taxonomy_id": prefs.get("taxonomy_id", ""),
         "price": os.getenv("ETSY_DEFAULT_PRICE", "5.00"),
         "quantity": os.getenv("ETSY_DEFAULT_QUANTITY", "10"),
         # Default materials fallback if env not set
