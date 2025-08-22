@@ -1,9 +1,11 @@
 import os
 import time
+import json
 import base64
 import hashlib
 import secrets
 from typing import Dict, Optional, Tuple, List
+from pathlib import Path
 
 import requests
 
@@ -11,12 +13,37 @@ ETSY_API_BASE = "https://openapi.etsy.com/v3/application"
 ETSY_AUTH_URL = "https://www.etsy.com/oauth/connect"
 ETSY_TOKEN_URL = "https://api.etsy.com/v3/public/oauth/token"
 
-# In-memory token store (single-user/dev). Replace with persistent store for multi-user.
-_token_store: Dict[str, object] = {
-    # "access_token": str,
-    # "refresh_token": str,
-    # "expires_at": int,  # epoch seconds
-}
+# JSON-backed token store (single-user/dev). Replace with DB for multi-user.
+_TOKEN_FILE = Path(os.getenv("ETSY_TOKEN_FILE") or (Path(__file__).resolve().parent / "resources" / "etsy_tokens.json"))
+
+
+def _load_tokens_from_file() -> Dict[str, object]:
+    try:
+        p = _TOKEN_FILE
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if p.exists():
+            with p.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+    except Exception:
+        pass
+    return {}
+
+
+def _persist_tokens(store: Dict[str, object]) -> None:
+    try:
+        p = _TOKEN_FILE
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("w", encoding="utf-8") as f:
+            json.dump(store, f, ensure_ascii=False)
+    except Exception:
+        # Non-fatal persistence failure shouldn't break auth flow
+        pass
+
+
+# Load tokens at import so they survive server restarts/page refreshes
+_token_store: Dict[str, object] = _load_tokens_from_file()
 
 # In-memory PKCE cache: state -> code_verifier
 _pkce_cache: Dict[str, str] = {}
@@ -74,6 +101,7 @@ def _save_tokens(data: Dict[str, object]) -> None:
     # expires_in is seconds from now
     expires_in = int(data.get("expires_in", 3600))
     _token_store["expires_at"] = int(time.time()) + max(expires_in - 60, 300)  # refresh 1 min early
+    _persist_tokens(_token_store)
 
 
 def has_tokens() -> bool:
@@ -118,6 +146,7 @@ def _refresh_token_if_needed() -> None:
     if not refresh_token:
         # no refresh token available
         _token_store.clear()
+        _persist_tokens(_token_store)
         return
 
     client_id = _env("ETSY_CLIENT_ID", _env("ETSY_API_KEY", ""))
@@ -135,6 +164,7 @@ def _refresh_token_if_needed() -> None:
     resp = requests.post(ETSY_TOKEN_URL, data=data, headers=headers, timeout=30)
     if resp.status_code >= 400:
         _token_store.clear()
+        _persist_tokens(_token_store)
         raise RuntimeError(f"Token refresh failed: {resp.status_code} {resp.text}")
     tokens = resp.json()
     _save_tokens(tokens)

@@ -1,3 +1,6 @@
 .env
 
 __pycache__
+
+# Persisted OAuth tokens (local dev only)
+app/**/etsy_tokens.json

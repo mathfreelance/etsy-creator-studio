@@ -21,6 +21,7 @@ logger = logging.getLogger("uvicorn.error")
 # In-memory progress channels keyed by request id (rid)
 _PROG_CHANNELS: Dict[str, Set[asyncio.Queue]] = {}
 _PROG_LOCK = asyncio.Lock()
+_PROG_STATE: Dict[str, Dict[str, Any]] = {}
 
 async def _push_progress(rid: str | None, payload: Dict[str, Any]) -> None:
     """Push a progress payload to all SSE subscribers for the given rid."""
@@ -28,6 +29,16 @@ async def _push_progress(rid: str | None, payload: Dict[str, Any]) -> None:
         return
     try:
         async with _PROG_LOCK:
+            # Record last-known state for replay on late subscribers
+            st = _PROG_STATE.setdefault(rid, {"steps": {}, "done": False, "error": None})
+            if isinstance(payload, dict):
+                ev = payload.get("event")
+                if ev == "step" and payload.get("step") and payload.get("status"):
+                    st["steps"][payload["step"]] = payload["status"]
+                elif ev == "done":
+                    st["done"] = True
+                elif ev == "error":
+                    st["error"] = payload
             queues = _PROG_CHANNELS.get(rid)
             if not queues:
                 return
@@ -48,12 +59,29 @@ async def process_stream(rid: str | None = None):
 
     async def gen() -> AsyncGenerator[str, None]:
         q: asyncio.Queue = asyncio.Queue()
+        # Capture replay snapshot under lock
+        replay: list[Dict[str, Any]] = []
+        done_flag = False
         async with _PROG_LOCK:
             subs = _PROG_CHANNELS.setdefault(rid, set())
             subs.add(q)
+            st = _PROG_STATE.get(rid)
+            if st:
+                # Recreate step events for last-known statuses in a deterministic order
+                for step, status in st.get("steps", {}).items():
+                    replay.append({"event": "step", "step": step, "status": status})
+                if st.get("error"):
+                    replay.append(st["error"])  # emit the error payload as-is
+                if st.get("done"):
+                    done_flag = True
         try:
             # Initial hello
             yield f"data: {json.dumps({'event': 'connected'})}\n\n"
+            # Replay last-known statuses (if any)
+            for item in replay:
+                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+            if done_flag:
+                return
             while True:
                 try:
                     item = await asyncio.wait_for(q.get(), timeout=15)
@@ -72,6 +100,7 @@ async def process_stream(rid: str | None = None):
                     subs.remove(q)
                 if subs is not None and len(subs) == 0:
                     _PROG_CHANNELS.pop(rid, None)
+                    _PROG_STATE.pop(rid, None)
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache",
