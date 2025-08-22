@@ -17,6 +17,39 @@ def etsy_auth_start():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/shop")
+def get_shop(shop_id: Optional[str] = None):
+    """Return Etsy shop details for the configured or provided shop_id."""
+    try:
+        data = etsy.get_shop(shop_id=shop_id)
+        return data
+    except PermissionError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/shop/listings")
+def get_shop_listings(
+    state: Optional[str] = "active",
+    limit: int = 24,
+    offset: int = 0,
+    shop_id: Optional[str] = None,
+):
+    """Return listings for the shop. Defaults to active listings."""
+    try:
+        data = etsy.get_shop_listings(shop_id=shop_id, state=state, limit=limit, offset=offset)
+        return data
+    except PermissionError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/auth/callback")
 def etsy_auth_callback(request: Request):
     """Handle OAuth callback from Etsy. Exchanges code for tokens and closes the window."""
@@ -33,6 +66,16 @@ def etsy_auth_callback(request: Request):
         etsy.exchange_code_for_token(code, verifier)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"OAuth failed: {e}")
+
+    # Attempt to auto-detect and persist the user's shop_id via /users/me
+    try:
+        me = etsy.get_me()
+        sid = me.get("shop_id") or me.get("user_id")
+        if sid:
+            etsy.set_prefs(shop_id=str(sid))
+    except Exception:
+        # Non-fatal: user can set shop_id later in preferences
+        pass
 
     # Simple HTML that notifies opener and closes the window
     html = """

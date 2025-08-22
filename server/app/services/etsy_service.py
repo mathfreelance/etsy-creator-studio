@@ -163,9 +163,10 @@ def _refresh_token_if_needed() -> None:
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     resp = requests.post(ETSY_TOKEN_URL, data=data, headers=headers, timeout=30)
     if resp.status_code >= 400:
+        # Invalidate and let caller treat as not authenticated so UI can show reconnect
         _token_store.clear()
         _persist_tokens(_token_store)
-        raise RuntimeError(f"Token refresh failed: {resp.status_code} {resp.text}")
+        raise PermissionError("NOT_AUTHENTICATED")
     tokens = resp.json()
     _save_tokens(tokens)
 
@@ -183,13 +184,19 @@ def get_auth_headers() -> Dict[str, str]:
 
 
 def get_prefs() -> Dict[str, str]:
-    """Return user preferences (shop_id, taxonomy_id) from the JSON token store only.
+    """Return user preferences (shop_id, taxonomy_id) from the JSON token store.
 
-    No environment fallback. If not present in the store, values are empty strings.
+    If taxonomy_id is missing on first run, initialize it to the default "2078" and persist it.
     """
+    shop_id = str(_token_store.get("shop_id") or "")
+    taxonomy_id = str(_token_store.get("taxonomy_id") or "").strip()
+    if not taxonomy_id:
+        taxonomy_id = "2078"
+        _token_store["taxonomy_id"] = taxonomy_id
+        _persist_tokens(_token_store)
     return {
-        "shop_id": str(_token_store.get("shop_id") or ""),
-        "taxonomy_id": str(_token_store.get("taxonomy_id") or ""),
+        "shop_id": shop_id,
+        "taxonomy_id": taxonomy_id,
     }
 
 
@@ -431,3 +438,93 @@ def get_defaults() -> Dict[str, str]:
         "pieces_included": os.getenv("ETSY_PIECES_INCLUDED", "1"),
         "currency_code": os.getenv("CURRENCY_CODE", "EUR"),
     }
+
+
+def get_shop(shop_id: Optional[str] = None) -> Dict[str, object]:
+    """Fetch Etsy shop details for the given shop_id or the persisted preference.
+
+    Raises when not authenticated or when shop_id is missing.
+    """
+    headers = get_auth_headers().copy()
+    # Prefer explicit param, then persisted preference
+    sid = (shop_id or get_defaults().get("shop_id") or "").strip()
+    if not sid:
+        # Auto-detect from tokens if possible
+        sid = ensure_shop_id()
+    url = f"{ETSY_API_BASE}/shops/{sid}"
+    resp = requests.get(url, headers=headers, timeout=30)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"getShop failed: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def get_shop_listings(shop_id: Optional[str] = None, state: Optional[str] = "active", limit: int = 24, offset: int = 0) -> Dict[str, object]:
+    """Fetch Etsy listings for the shop. Defaults to active listings.
+
+    state can be one of: active, draft, inactive, expired, sold_out, featured (as supported by Etsy).
+    """
+    headers = get_auth_headers().copy()
+    sid = (shop_id or get_defaults().get("shop_id") or "").strip()
+    if not sid:
+        # Auto-detect from tokens if possible
+        sid = ensure_shop_id()
+    # Build endpoint path
+    if state and state.strip():
+        path = f"listings/{state.strip()}"
+    else:
+        path = "listings"
+    url = f"{ETSY_API_BASE}/shops/{sid}/{path}"
+    params = {
+        "limit": max(1, min(int(limit or 24), 100)),
+        "offset": max(0, int(offset or 0)),
+    }
+    resp = requests.get(url, headers=headers, params=params, timeout=30)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"getShopListings failed: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def get_my_shops() -> Dict[str, object]:
+    """Fetch the list of shops for the authenticated user.
+
+    This is used to auto-detect and persist the user's shop_id after OAuth.
+    """
+    headers = get_auth_headers().copy()
+    url = f"{ETSY_API_BASE}/users/me/shops"
+    resp = requests.get(url, headers=headers, timeout=30)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"getMyShops failed: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def get_me() -> Dict[str, object]:
+    """Fetch basic info about the authenticated user (user_id, shop_id).
+
+    Endpoint: GET /users/me
+    """
+    headers = get_auth_headers().copy()
+    url = f"{ETSY_API_BASE}/users/me"
+    resp = requests.get(url, headers=headers, timeout=30)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"getMe failed: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def ensure_shop_id() -> str:
+    """Return a persisted shop_id; if missing but tokens exist, auto-detect it and persist.
+
+    Raises RuntimeError with the standard "Missing shop_id" message if not resolvable.
+    """
+    sid = str(_token_store.get("shop_id") or "").strip()
+    if sid:
+        return sid
+    # Require valid tokens
+    _ = get_auth_headers()
+    # Fetch minimal user info; prefer explicit shop_id from response, else fallback to user_id
+    me = get_me()
+    sid = str(me.get("shop_id") or me.get("user_id") or "").strip()
+    if sid:
+        _token_store["shop_id"] = sid
+        _persist_tokens(_token_store)
+        return sid
+    raise RuntimeError("Missing shop_id. Configure preferences via /etsy/prefs.")

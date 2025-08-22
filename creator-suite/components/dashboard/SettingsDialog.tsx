@@ -76,7 +76,7 @@ export function SettingsDialog() {
       const r = await fetch("/api/etsy/prefs", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ shop_id: shopId, taxonomy_id: taxonomyId }),
+        body: JSON.stringify({ taxonomy_id: taxonomyId }),
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
@@ -176,8 +176,10 @@ export function SettingsDialog() {
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label htmlFor="shop">Shop ID</Label>
-                <Input id="shop" value={shopId} onChange={(e) => setShopId(e.target.value)} />
+                <Label>Shop ID</Label>
+                <div className="text-sm rounded-md border px-3 py-2 bg-muted/30 break-all select-text">
+                  {shopId ? shopId : <span className="text-muted-foreground">—</span>}
+                </div>
               </div>
               <div className="space-y-1">
                 <Label htmlFor="taxo">Taxonomy ID</Label>

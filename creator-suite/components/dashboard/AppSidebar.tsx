@@ -44,8 +44,13 @@ const data = {
   navMain: [
     {
       title: "Dashboard",
-      url: "#",
+      url: "/dashboard",
       icon: IconDashboard,
+    },
+    {
+      title: "Etsy Shop",
+      url: "/dashboard/etsy-shop",
+      icon: IconDatabase,
     },
     /*{
       title: "Lifecycle",
