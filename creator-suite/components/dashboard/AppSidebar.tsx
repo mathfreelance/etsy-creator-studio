@@ -48,9 +48,9 @@ const data = {
       icon: IconDashboard,
     },
     {
-      title: "Etsy Shop",
-      url: "/dashboard/etsy-shop",
-      icon: IconDatabase,
+      title: "Creator Studio",
+      url: "/dashboard/creator-studio",
+      icon: IconReport,
     },
     /*{
       title: "Lifecycle",

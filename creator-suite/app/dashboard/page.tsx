@@ -1,266 +1,260 @@
 "use client"
 
-import React from "react"
-import { AppSidebar } from "@/components/dashboard/AppSidebar"
-import { SiteHeader } from "@/components/dashboard/SiteHeader"
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import * as React from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Image as ImageIcon, Settings } from "lucide-react"
-import { ImageDropzone } from "@/components/dashboard/ImageDropzone"
-import { OptionsPanel, type Options } from "@/components/dashboard/OptionsPanel"
-import { processImage, downloadBlob } from "@/lib/api"
-import { ResultsPanel } from "@/components/dashboard/ResultsPanel"
-import { ProgressPanel, type StepKey } from "@/components/dashboard/ProgressPanel"
-import { parseProcessZip, type ParsedPackage } from "@/lib/zip"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
+import { IconAlertCircle, IconExternalLink, IconPlugConnected, IconRefresh, IconShoppingBag } from "@tabler/icons-react"
+import { etsyAuthStatus, etsyGetShop, etsyGetShopListings, extractListingsArray } from "@/lib/etsy"
+import { HeaderTitle } from "@/components/header-title-context"
 
 export default function Page() {
-  const [selectedImage, setSelectedImage] = React.useState<File | null>(null)
-  const [options, setOptions] = React.useState<Options>({
-    dpi: 300,
-    mockups: true,
-    video: false,
-    texts: {
-      enabled: true,
-      title: true,
-      alt: true,
-      description: true,
-      tags: true,
-    },
-    enhance: {
-      enabled: false,
-      scale: 2,
-    },
-  })
-  const [isProcessing, setIsProcessing] = React.useState(false)
-  const [results, setResults] = React.useState<ParsedPackage | null>(null)
-  const [zipBlob, setZipBlob] = React.useState<Blob | null>(null)
-  const [zipFilename, setZipFilename] = React.useState<string | undefined>(undefined)
-  React.useEffect(() => {
-    return () => {
-      try { results?.release() } catch {}
-    }
-  }, [results])
-
-  // Progress (SSE)
-  const [rid, setRid] = React.useState<string | null>(null)
-  const esRef = React.useRef<EventSource | null>(null)
-  const [stepOrder, setStepOrder] = React.useState<StepKey[]>([])
-  const [stepStatus, setStepStatus] = React.useState<Record<string, 'pending' | 'started' | 'done'>>({})
+  const [checking, setChecking] = React.useState(true)
+  const [connected, setConnected] = React.useState(false)
+  const [shop, setShop] = React.useState<any | null>(null)
+  const [listings, setListings] = React.useState<any[]>([])
+  const [loading, setLoading] = React.useState(false)
+  const [missingShopId, setMissingShopId] = React.useState(false)
 
   React.useEffect(() => {
-    return () => {
-      if (esRef.current) {
-        try { esRef.current.close() } catch {}
-        esRef.current = null
+    init()
+    const onMsg = (ev: MessageEvent) => {
+      if (ev?.data?.type === "etsyConnected") {
+        setConnected(true)
+        loadData()
+        toast.success("Etsy connecté")
       }
     }
+    window.addEventListener("message", onMsg)
+    return () => window.removeEventListener("message", onMsg)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function computeSteps(opts: Options): StepKey[] {
-    const arr: StepKey[] = ["image"]
-    if (opts.mockups) arr.push("mockups")
-    if (opts.video) arr.push("video")
-    if (opts.texts.enabled) arr.push("texts")
-    arr.push("zip")
-    return arr
-  }
-
-  function startProgress(newRid: string, opts: Options) {
-    // Close previous stream if any
-    if (esRef.current) {
-      try { esRef.current.close() } catch {}
-      esRef.current = null
-    }
-    const steps = computeSteps(opts)
-    setStepOrder(steps)
-    const init: Record<string, 'pending' | 'started' | 'done'> = {}
-    for (const s of steps) init[s] = 'pending'
-    setStepStatus(init)
-    // Optimistically mark the first step as started to avoid race with SSE subscription
-    if (steps.includes('image')) {
-      setStepStatus(prev => ({ ...prev, image: 'started' }))
-    }
-
-    const es = new EventSource(`/api/process/stream?rid=${encodeURIComponent(newRid)}`)
-    esRef.current = es
-
-    es.onmessage = (e) => {
-      try {
-        const payload = JSON.parse(e.data)
-        if (payload.event === 'step' && payload.step && payload.status) {
-          setStepStatus(prev => ({ ...prev, [payload.step]: payload.status }))
-        } else if (payload.event === 'started') {
-          // Fallback: ensure UI shows running if backend only sends global started
-          setStepStatus(prev => (prev.image === 'pending' ? { ...prev, image: 'started' } : prev))
-        } else if (payload.event === 'connected') {
-          // Connection established: if any early events were missed, ensure initial running states
-          setStepStatus(prev => ({
-            ...prev,
-            ...(steps.includes('image') && prev.image === 'pending' ? { image: 'started' } : {}),
-          }))
-        } else if (payload.event === 'done') {
-          // Mark any remaining steps as done
-          setStepStatus(prev => {
-            const next = { ...prev }
-            for (const s of steps) if (next[s] !== 'done') next[s] = 'done'
-            return next
-          })
-          try { es.close() } catch {}
-        } else if (payload.event === 'error') {
-          toast.error(`Erreur étape ${payload.step || ''}`.trim())
-          try { es.close() } catch {}
-        }
-      } catch {
-        // ignore parse errors
-      }
-    }
-
-    es.onerror = () => {
-      // Silent; the main request still runs; avoid spamming toasts
-    }
-  }
-
-  async function handleContinue() {
-    if (!selectedImage) {
-      toast.error("Aucune image sélectionnée")
-      return
-    }
-    setIsProcessing(true)
+  async function init() {
+    setChecking(true)
     try {
-      // Cleanup previous preview to avoid leaking object URLs
-      if (results) {
-        try { results.release() } catch {}
-      }
-      setResults(null)
-      setZipBlob(null)
-      setZipFilename(undefined)
-
-      // Progress: new rid and start SSE
-      const newRid = (globalThis.crypto && 'randomUUID' in globalThis.crypto)
-        ? (globalThis.crypto as any).randomUUID()
-        : Math.random().toString(36).slice(2)
-      setRid(newRid)
-      startProgress(newRid, options)
-
-      const promise = processImage({
-        file: selectedImage,
-        dpi: options.dpi,
-        mockups: options.mockups,
-        video: options.video,
-        texts: options.texts.enabled,
-        enhance: options.enhance.enabled,
-        upscale: options.enhance.scale,
-        rid: newRid,
-      })
-      toast.promise(promise, {
-        loading: "Traitement en cours…",
-        success: "Traitement terminé",
-        error: (err: any) => (typeof err?.message === "string" ? err.message : "Erreur pendant le traitement"),
-      })
-      const { blob, filename } = await promise
-      const parsed = await parseProcessZip(blob)
-      setResults(parsed)
-      setZipBlob(blob)
-      setZipFilename(filename)
-    } catch (err: any) {
-      // toast.promise handles error display
+      const st = await etsyAuthStatus()
+      setConnected(!!st.connected)
+      if (st.connected) await loadData()
+    } catch {
+      // ignore
     } finally {
-      setIsProcessing(false)
+      setChecking(false)
     }
   }
 
-  function handleReset() {
-    if (results) {
-      try { results.release() } catch {}
+  async function loadData() {
+    setLoading(true)
+    setMissingShopId(false)
+    try {
+      const [s, l] = await Promise.all([
+        etsyGetShop(),
+        etsyGetShopListings({ state: "active", limit: 24, offset: 0 }),
+      ])
+      setShop(s)
+      setListings(extractListingsArray(l))
+    } catch (e: any) {
+      const msg = typeof e?.message === "string" ? e.message : ""
+      if (msg.toLowerCase().includes("missing shop_id")) {
+        setMissingShopId(true)
+      } else {
+        toast.error(msg || "Échec du chargement des données")
+      }
+    } finally {
+      setLoading(false)
     }
-    if (esRef.current) {
-      try { esRef.current.close() } catch {}
-      esRef.current = null
-    }
-    setSelectedImage(null)
-    setOptions({
-      dpi: 300,
-      mockups: true,
-      video: false,
-      texts: { enabled: true, title: true, alt: true, description: true, tags: true },
-      enhance: { enabled: false, scale: 2 },
-    })
-    setResults(null)
-    setZipBlob(null)
-    setZipFilename(undefined)
-    setRid(null)
-    setStepOrder([])
-    setStepStatus({})
   }
+
+  function connectEtsy() {
+    // Mirrors SettingsDialog logic to open OAuth in a popup
+    fetch("/api/etsy/auth/start")
+      .then((r) => (r.ok ? r.clone().json().catch(() => ({})) : {}))
+      .then((j) => {
+        const target = (j as any)?.url || "/api/etsy/auth/start"
+        const w = window.open(target, "etsy-oauth", "width=800,height=700")
+        if (!w) toast.info("Popup bloquée. Autorise les popups et réessaie.")
+      })
+      .catch(() => {
+        const w = window.open("/api/etsy/auth/start", "etsy-oauth", "width=800,height=700")
+        if (!w) toast.info("Popup bloquée. Autorise les popups et réessaie.")
+      })
+  }
+
+  function openSettings() {
+    window.dispatchEvent(new Event("open-settings"))
+  }
+
+  const shopName =
+    (shop && (shop.shop_name || shop.name || shop.title)) ||
+    (shop && shop.results && shop.results[0] && (shop.results[0].shop_name || shop.results[0].name)) ||
+    "Ma boutique"
+  const shopId = (shop && (shop.shop_id || shop.id)) ||
+    (shop && shop.results && shop.results[0] && (shop.results[0].shop_id || shop.results[0].id))
+  const currency = (shop && (shop.currency_code || shop.currency)) || "EUR"
 
   return (
-    <SidebarProvider
-      style={
-        {
-          "--sidebar-width": "calc(var(--spacing) * 72)",
-          "--header-height": "calc(var(--spacing) * 12)",
-        } as React.CSSProperties
-      }
-    >
-      <AppSidebar variant="inset" />
-      <SidebarInset>
-        <SiteHeader />
-        <div className="flex flex-1 flex-col">
-          <div className="container max-w-6xl mx-auto p-4 md:p-6 flex flex-col gap-6">
+    <>
+      <HeaderTitle title="Dashboard" />
+      <div className="flex flex-1 flex-col">
+        <div className="container max-w-6xl mx-auto p-4 md:p-6 flex flex-col gap-6">
             <div className="space-y-1">
-              <h2 className="text-xl font-semibold">Creator Studio</h2>
-              <p className="text-sm text-muted-foreground">Dépose une image, choisis tes options, c’est tout.</p>
+              <h2 className="text-xl font-semibold">Etsy Shop</h2>
+              <p className="text-sm text-muted-foreground">Vue d'ensemble de ta boutique Etsy et de tes annonces actives.</p>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card className="rounded-2xl">
+            {checking ? (
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-5 w-28" />
+                <Skeleton className="h-5 w-20" />
+              </div>
+            ) : !connected ? (
+              <Card className="rounded-2xl border-dashed">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <ImageIcon className="size-4" /> Image
+                    <IconAlertCircle className="size-5 text-amber-600" />
+                    Non connecté à Etsy
                   </CardTitle>
-                  <CardDescription>Ajoute une seule image (JPG, PNG ou WEBP, max 15 Mo)</CardDescription>
+                  <CardDescription>
+                    Connecte ta boutique pour afficher tes données Etsy.
+                  </CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <ImageDropzone value={selectedImage} onChange={setSelectedImage} />
+                <CardContent className="flex flex-wrap gap-2">
+                  <Button onClick={connectEtsy}>
+                    <IconPlugConnected className="size-4 mr-2" /> Connecter Etsy
+                  </Button>
+                  <Button onClick={openSettings} variant="secondary">
+                    Ouvrir les paramètres
+                  </Button>
                 </CardContent>
               </Card>
+            ) : (
+              missingShopId ? (
+                <Card className="rounded-2xl border-dashed">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <IconAlertCircle className="size-5 text-amber-600" />
+                      Shop ID manquant
+                    </CardTitle>
+                    <CardDescription>
+                      Nous n'avons pas encore détecté ton Shop ID. Clique sur « Connecter Etsy » pour l'auto-détecter après connexion,
+                      ou ouvre les paramètres pour le renseigner manuellement.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-wrap gap-2">
+                    <Button onClick={connectEtsy}>
+                      <IconPlugConnected className="size-4 mr-2" /> Connecter Etsy
+                    </Button>
+                    <Button onClick={openSettings} variant="secondary">
+                      Ouvrir les paramètres
+                    </Button>
+                    <Button onClick={loadData} variant="outline">
+                      <IconRefresh className="size-4 mr-2" /> Réessayer
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <Card className="rounded-2xl">
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <IconShoppingBag className="size-5" />
+                          {shopName}
+                          <Badge variant="secondary" className="ml-2">{currency}</Badge>
+                        </CardTitle>
+                        <CardDescription>Shop ID: {shopId || "N/A"}</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        {loading ? (
+                          <Skeleton className="h-5 w-40" />
+                        ) : (
+                          <div className="flex items-center gap-4 text-sm">
+                            <div className="flex items-center gap-1">
+                              <span className="text-muted-foreground">Annonces actives:</span>
+                              <span className="font-medium">{listings.length}</span>
+                            </div>
+                            <Button size="sm" variant="outline" onClick={loadData}>
+                              <IconRefresh className="size-4 mr-2" /> Rafraîchir
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
 
-              <Card className="rounded-2xl">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Settings className="size-4" /> Options
-                  </CardTitle>
-                  <CardDescription>Choisis la résolution et les contenus à inclure</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <OptionsPanel
-                    hasImage={!!selectedImage}
-                    value={options}
-                    onChange={setOptions}
-                    onContinue={handleContinue}
-                    onReset={handleReset}
-                    loading={isProcessing}
-                  />
-                </CardContent>
-              </Card>
-            </div>
+                    <Card className="rounded-2xl">
+                      <CardHeader>
+                        <CardTitle>Aide & Raccourcis</CardTitle>
+                        <CardDescription>Accède rapidement aux actions Etsy.</CardDescription>
+                      </CardHeader>
+                      <CardContent className="flex flex-wrap gap-2">
+                        <Button asChild variant="outline">
+                          <a href="/dashboard/creator-studio" className="flex items-center">
+                            Aller au Creator Studio
+                          </a>
+                        </Button>
+                        <Button variant="secondary" onClick={openSettings}>Paramètres Etsy</Button>
+                      </CardContent>
+                    </Card>
+                  </div>
 
-            {stepOrder.length > 0 && (
-              <ProgressPanel steps={stepOrder} status={stepStatus} />
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-base font-semibold">Annonces actives</h3>
+                      <div className="text-sm text-muted-foreground">{listings.length} éléments</div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {loading ? (
+                        Array.from({ length: 6 }).map((_, i) => (
+                          <div key={i} className="rounded-xl border p-4">
+                            <Skeleton className="h-24 w-full rounded-lg" />
+                            <div className="mt-3 space-y-2">
+                              <Skeleton className="h-4 w-3/4" />
+                              <Skeleton className="h-4 w-1/2" />
+                            </div>
+                          </div>
+                        ))
+                      ) : listings.length === 0 ? (
+                        <div className="col-span-full text-sm text-muted-foreground">Aucune annonce active trouvée.</div>
+                      ) : (
+                        listings.map((it, idx) => {
+                          const id = it.listing_id || it.id || it.listingId
+                          const title = it.title || it.listing_title || `Listing #${id || idx + 1}`
+                          const state = it.state || it.state_tsz || "active"
+                          const price = (typeof it.price === 'string') ? it.price : (it.price?.amount && it.price?.currency_code ? `${(Number(it.price.amount) / 100).toFixed(2)} ${it.price.currency_code}` : undefined)
+                          const link = id ? `https://www.etsy.com/listing/${id}` : undefined
+                          return (
+                            <div key={id || idx} className="rounded-xl border p-4">
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="font-medium line-clamp-1">{title}</div>
+                                  <Badge variant="secondary" className="shrink-0">{String(state)}</Badge>
+                                </div>
+                                <div className="text-sm text-muted-foreground">
+                                  {price ? price : id ? `#${id}` : ""}
+                                </div>
+                              </div>
+                              {link && (
+                                <div className="mt-3">
+                                  <Button asChild size="sm" variant="outline">
+                                    <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center">
+                                      <IconExternalLink className="size-4 mr-2" /> Voir sur Etsy
+                                    </a>
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                </>
+              )
             )}
-
-            {results && (
-              <ResultsPanel
-                data={results}
-                filename={zipFilename}
-                onDownload={zipBlob ? () => downloadBlob(zipBlob, zipFilename || "package.zip") : undefined}
-              />
-            )}
-          </div>
         </div>
-      </SidebarInset>
-    </SidebarProvider>
+      </div>
+    </>
   )
 }
-
