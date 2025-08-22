@@ -98,11 +98,10 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
       }
     } catch {}
     setCreating(true)
-    try {
-      const blob = await fetch(data.processedImageUrl).then((r) => r.blob())
+    const promise = (async () => {
+      const blob = await fetch(data.processedImageUrl!).then((r) => r.blob())
       if (blob.size > 20 * 1024 * 1024) {
-        toast.error("Le fichier digital dépasse 20 Mo")
-        return
+        throw new Error("Le fichier digital dépasse 20 Mo")
       }
       const fd = new FormData()
       fd.append("processed", new File([blob], "processed.png", { type: "image/png" }))
@@ -154,17 +153,24 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
         if (resp.status === 401) {
           try { localStorage.setItem("etsy_connected", "false") } catch {}
           setEtsyConnected(false)
-          toast.error("Authentification Etsy requise. Ouvre les paramètres pour te connecter.")
           openSettings()
-          return
+          throw new Error("Authentification Etsy requise. Ouvre les paramètres pour te connecter.")
         }
         throw new Error(json?.detail || "Création du draft Etsy a échoué")
       }
       const id = json?.listing_id || json?.listing?.listing_id
       const sku = json?.sku
-      toast.success(`Draft Etsy créé (ID ${id || "?"}${sku ? `, SKU ${sku}` : ""})`)
-    } catch (e: any) {
-      toast.error(e?.message || "Erreur inconnue")
+      return { id, sku }
+    })()
+
+    toast.promise(promise, {
+      loading: "Création du draft Etsy…",
+      success: ({ id, sku }) => `Draft Etsy créé (ID ${id || "?"}${sku ? `, SKU ${sku}` : ""})`,
+      error: (e) => (typeof e?.message === 'string' ? e.message : 'Erreur inconnue'),
+    })
+
+    try {
+      await promise
     } finally {
       setCreating(false)
     }

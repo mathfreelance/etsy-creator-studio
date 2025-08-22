@@ -77,6 +77,10 @@ export default function Page() {
     const init: Record<string, 'pending' | 'started' | 'done'> = {}
     for (const s of steps) init[s] = 'pending'
     setStepStatus(init)
+    // Optimistically mark the first step as started to avoid race with SSE subscription
+    if (steps.includes('image')) {
+      setStepStatus(prev => ({ ...prev, image: 'started' }))
+    }
 
     const es = new EventSource(`/api/process/stream?rid=${encodeURIComponent(newRid)}`)
     esRef.current = es
@@ -86,6 +90,15 @@ export default function Page() {
         const payload = JSON.parse(e.data)
         if (payload.event === 'step' && payload.step && payload.status) {
           setStepStatus(prev => ({ ...prev, [payload.step]: payload.status }))
+        } else if (payload.event === 'started') {
+          // Fallback: ensure UI shows running if backend only sends global started
+          setStepStatus(prev => (prev.image === 'pending' ? { ...prev, image: 'started' } : prev))
+        } else if (payload.event === 'connected') {
+          // Connection established: if any early events were missed, ensure initial running states
+          setStepStatus(prev => ({
+            ...prev,
+            ...(steps.includes('image') && prev.image === 'pending' ? { image: 'started' } : {}),
+          }))
         } else if (payload.event === 'done') {
           // Mark any remaining steps as done
           setStepStatus(prev => {

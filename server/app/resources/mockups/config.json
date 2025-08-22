@@ -11,7 +11,7 @@
       "name": "mockup_2",
       "background_path": "assets/backgrounds/mockup2_bg.jpg",
       "overlay_path": null,
-      "placement": { "x": 433, "y": 83, "width": 401, "height": 599 },
+      "placement": { "x": 433, "y": 83, "width": 401, "height": 601 },
       "output": "mockups/output/mockup_2.jpg"
     },
     {

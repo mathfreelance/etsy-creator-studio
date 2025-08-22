@@ -122,6 +122,8 @@ async def process(
         f"[process] start filename={getattr(image, 'filename', None)} dpi={dpi} "
         f"enhance={enhance} upscale={upscale} mockups={mockups} video={video} texts={texts}"
     )
+    # Mark image step as started as soon as processing begins
+    await _push_progress(rid, {"event": "step", "step": "image", "status": "started"})
 
     # Start text generation early (from raw input) in parallel with image processing
     texts_task = None
@@ -172,6 +174,8 @@ async def process(
 
     if mockups:
         logger.info("[process] starting mockups generation…")
+        # Mark mockups step as started when we kick off generation
+        await _push_progress(rid, {"event": "step", "step": "mockups", "status": "started"})
         mockups_task = asyncio.create_task(asyncio.to_thread(build_mockups, processed_png))
 
     # text generation already launched at start if enabled
@@ -196,6 +200,8 @@ async def process(
     if video:
         t_v = time.perf_counter()
         try:
+            # Mark video step as started before building preview
+            await _push_progress(rid, {"event": "step", "step": "video", "status": "started"})
             frames = mockup_bytes if mockup_bytes else [processed_png, processed_png, processed_png]
             mp4 = await asyncio.to_thread(build_preview_video, frames)
             files.append(("video/preview.mp4", mp4))
