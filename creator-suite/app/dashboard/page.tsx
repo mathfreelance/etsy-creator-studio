@@ -56,8 +56,6 @@ export default function Page() {
   return (
     <>
       <HeaderTitle title="Dashboard" />
-      <div className="flex flex-1 flex-col">
-        <div className="container max-w-6xl mx-auto p-4 md:p-6 flex flex-col gap-6">
             <div className="space-y-1">
               <h2 className="text-xl font-semibold">Etsy Shop</h2>
               <p className="text-sm text-muted-foreground">Vue d'ensemble de ta boutique Etsy et de tes annonces actives.</p>
@@ -212,8 +210,6 @@ export default function Page() {
                 </>
               )
             )}
-        </div>
-      </div>
     </>
   )
 }
