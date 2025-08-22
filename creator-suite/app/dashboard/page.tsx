@@ -7,23 +7,17 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
 import { IconAlertCircle, IconExternalLink, IconPlugConnected, IconRefresh, IconShoppingBag } from "@tabler/icons-react"
-import { etsyAuthStatus, etsyGetShop, etsyGetShopListings, extractListingsArray } from "@/lib/etsy"
-import { HeaderTitle } from "@/components/header-title-context"
+import { HeaderTitle } from "@/components/contexts/header-title-context"
+import { useDashboardData } from "@/components/contexts/dashboard-data-context"
+import Link from "next/link"
 
 export default function Page() {
-  const [checking, setChecking] = React.useState(true)
-  const [connected, setConnected] = React.useState(false)
-  const [shop, setShop] = React.useState<any | null>(null)
-  const [listings, setListings] = React.useState<any[]>([])
-  const [loading, setLoading] = React.useState(false)
-  const [missingShopId, setMissingShopId] = React.useState(false)
+  const { checking, connected, shop, listings, loading, missingShopId, refresh } = useDashboardData()
 
   React.useEffect(() => {
-    init()
     const onMsg = (ev: MessageEvent) => {
       if (ev?.data?.type === "etsyConnected") {
-        setConnected(true)
-        loadData()
+        void refresh()
         toast.success("Etsy connecté")
       }
     }
@@ -31,41 +25,6 @@ export default function Page() {
     return () => window.removeEventListener("message", onMsg)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  async function init() {
-    setChecking(true)
-    try {
-      const st = await etsyAuthStatus()
-      setConnected(!!st.connected)
-      if (st.connected) await loadData()
-    } catch {
-      // ignore
-    } finally {
-      setChecking(false)
-    }
-  }
-
-  async function loadData() {
-    setLoading(true)
-    setMissingShopId(false)
-    try {
-      const [s, l] = await Promise.all([
-        etsyGetShop(),
-        etsyGetShopListings({ state: "active", limit: 24, offset: 0 }),
-      ])
-      setShop(s)
-      setListings(extractListingsArray(l))
-    } catch (e: any) {
-      const msg = typeof e?.message === "string" ? e.message : ""
-      if (msg.toLowerCase().includes("missing shop_id")) {
-        setMissingShopId(true)
-      } else {
-        toast.error(msg || "Échec du chargement des données")
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
 
   function connectEtsy() {
     // Mirrors SettingsDialog logic to open OAuth in a popup
@@ -149,7 +108,7 @@ export default function Page() {
                     <Button onClick={openSettings} variant="secondary">
                       Ouvrir les paramètres
                     </Button>
-                    <Button onClick={loadData} variant="outline">
+                    <Button onClick={() => void refresh()} variant="outline">
                       <IconRefresh className="size-4 mr-2" /> Réessayer
                     </Button>
                   </CardContent>
@@ -175,7 +134,7 @@ export default function Page() {
                               <span className="text-muted-foreground">Annonces actives:</span>
                               <span className="font-medium">{listings.length}</span>
                             </div>
-                            <Button size="sm" variant="outline" onClick={loadData}>
+                            <Button size="sm" variant="outline" onClick={() => void refresh()}>
                               <IconRefresh className="size-4 mr-2" /> Rafraîchir
                             </Button>
                           </div>
@@ -190,9 +149,9 @@ export default function Page() {
                       </CardHeader>
                       <CardContent className="flex flex-wrap gap-2">
                         <Button asChild variant="outline">
-                          <a href="/dashboard/creator-studio" className="flex items-center">
+                          <Link href="/dashboard/creator-studio" className="flex items-center">
                             Aller au Creator Studio
-                          </a>
+                          </Link>
                         </Button>
                         <Button variant="secondary" onClick={openSettings}>Paramètres Etsy</Button>
                       </CardContent>

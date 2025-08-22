@@ -10,7 +10,7 @@ import { ResultsPanel } from "@/components/dashboard/ResultsPanel"
 import { ProgressPanel, type StepKey } from "@/components/dashboard/ProgressPanel"
 import { parseProcessZip, type ParsedPackage } from "@/lib/zip"
 import { toast } from "sonner"
-import { HeaderTitle } from "@/components/header-title-context"
+import { HeaderTitle } from "@/components/contexts/header-title-context"
 
 export default function Page() {
   const [selectedImage, setSelectedImage] = React.useState<File | null>(null)
