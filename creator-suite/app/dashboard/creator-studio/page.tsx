@@ -39,7 +39,7 @@ export default function Page() {
     },
     enhance: {
       enabled: true,
-      scale: 2,
+      scale: 4,
     },
   });
   const [isProcessing, setIsProcessing] = React.useState(false);
@@ -273,7 +273,7 @@ export default function Page() {
         description: true,
         tags: true,
       },
-      enhance: { enabled: true, scale: 2 },
+      enhance: { enabled: true, scale: 4 },
     });
     setResults(null);
     setZipBlob(null);

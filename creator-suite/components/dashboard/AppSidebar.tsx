@@ -53,6 +53,11 @@ const data = {
       url: "/dashboard/creator-studio",
       icon: IconReport,
     },
+    {
+      title: "Batch",
+      url: "/dashboard/creator-studio/batch",
+      icon: IconListDetails,
+    },
     /*{
       title: "Lifecycle",
       url: "#",
