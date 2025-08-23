@@ -70,8 +70,15 @@ def enhance_image_bytes(image_bytes: bytes, scale: int = 2, dpi: int = 300) -> b
     # 1) Upload
     files = {"myfile": (f"input.{fmt.lower()}", image_bytes, mime)}
     data = {"scaleRadio": str(scale)}
-    r = sess.post(UPLOAD_URL, files=files, data=data, timeout=60)
-    r.raise_for_status()
+    for attempt in range(2):
+        try:
+            r = sess.post(UPLOAD_URL, files=files, data=data, timeout=60)
+            r.raise_for_status()
+            break
+        except requests.exceptions.Timeout:
+            if attempt >= 1:
+                raise
+            time.sleep(2.0 * (attempt + 1))
     jr = r.json()
     if jr.get("code") != 200 or "data" not in jr or "code" not in jr["data"]:
         raise RuntimeError(f"Unexpected upload response: {jr}")
@@ -84,23 +91,29 @@ def enhance_image_bytes(image_bytes: bytes, scale: int = 2, dpi: int = 300) -> b
     status = None
     last_payload = None
 
-    def _check_status(sess: requests.Session, job_code: str, scale: int):
+    def _check_status(sess: requests.Session, job_code: str, scale: int, retries: int = 1):
         payload = {"code": job_code, "scaleRadio": str(scale)}
-        rr = sess.post(
-            STATUS_URL,
-            json=payload,
-            headers={"Content-Type": "application/json; charset=UTF-8"},
-            timeout=30,
-        )
-        if rr.status_code == 415:
-            rr = sess.post(
-                STATUS_URL,
-                data=payload,
-                headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
-                timeout=30,
-            )
-        rr.raise_for_status()
-        return rr.json()
+        for attempt in range(retries + 1):
+            try:
+                rr = sess.post(
+                    STATUS_URL,
+                    json=payload,
+                    headers={"Content-Type": "application/json; charset=UTF-8"},
+                    timeout=30,
+                )
+                if rr.status_code == 415:
+                    rr = sess.post(
+                        STATUS_URL,
+                        data=payload,
+                        headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
+                        timeout=30,
+                    )
+                rr.raise_for_status()
+                return rr.json()
+            except requests.exceptions.Timeout:
+                if attempt >= retries:
+                    raise
+                time.sleep(2.0 * (attempt + 1))
 
     while time.time() - start < timeout:
         pj = _check_status(sess, job_code, scale)
@@ -114,13 +127,23 @@ def enhance_image_bytes(image_bytes: bytes, scale: int = 2, dpi: int = 300) -> b
             if not urls:
                 raise RuntimeError(f"No download URL in: {pj}")
             download_url = urls[0]
-            dr = sess.get(download_url, stream=True, timeout=120)
-            dr.raise_for_status()
-            chunks = []
-            for chunk in dr.iter_content(chunk_size=1 << 16):
-                if chunk:
-                    chunks.append(chunk)
-            data = b"".join(chunks)
+            # Download with one retry on timeout
+            last_exc = None
+            for attempt in range(2):
+                try:
+                    dr = sess.get(download_url, stream=True, timeout=120)
+                    dr.raise_for_status()
+                    chunks = []
+                    for chunk in dr.iter_content(chunk_size=1 << 16):
+                        if chunk:
+                            chunks.append(chunk)
+                    data = b"".join(chunks)
+                    break
+                except requests.exceptions.Timeout as e:
+                    last_exc = e
+                    if attempt >= 1:
+                        raise
+                    time.sleep(2.0 * (attempt + 1))
             # Ensure requested DPI explicitly
             if dpi:
                 data = ensure_dpi_bytes(data, dpi)
