@@ -110,13 +110,20 @@ async function etsyConnected(): Promise<boolean> {
   }
 }
 
-async function publishDraftFromParsed(data: ParsedPackage, price = "5.00", quantity = "10") {
+async function publishDraftFromParsed(
+  data: ParsedPackage,
+  price = "5.00",
+  quantity = "10",
+  opts?: { skipAuthCheck?: boolean }
+) {
   if (!data.processedImageUrl) throw new Error("Aucune image traitée disponible")
   // ensure auth
-  const connected = await etsyConnected()
-  if (!connected) {
-    window.dispatchEvent(new Event('open-settings'))
-    throw new Error("Authentification Etsy requise. Ouvre les paramètres pour te connecter.")
+  if (!opts?.skipAuthCheck) {
+    const connected = await etsyConnected()
+    if (!connected) {
+      window.dispatchEvent(new Event('open-settings'))
+      throw new Error("Authentification Etsy requise. Ouvre les paramètres pour te connecter.")
+    }
   }
   const srcBlob = await fetch(data.processedImageUrl).then((r) => r.blob())
   const jpegBlob = await toJpeg(srcBlob, 1)
@@ -438,25 +445,25 @@ export default function BatchPage() {
     }
     // set all to pending
     setJobs((prev) => prev.map((j) => selected.has(j.id) && j.result ? { ...j, publish: { status: 'pending' } } : j))
-    const promise = (async () => {
-      let ok = 0, ko = 0
-      await Promise.allSettled(publishable.map(async (j) => {
-        try {
-          const { id: listingId } = await publishDraftFromParsed(j.result!, etsyPrice, etsyQuantity)
-          ok++
-          setJobs((prev) => prev.map((x) => x.id === j.id ? { ...x, publish: { status: 'done', listingId } } : x))
-        } catch (e: any) {
-          ko++
-          setJobs((prev) => prev.map((x) => x.id === j.id ? { ...x, publish: { status: 'error', error: e?.message || 'Erreur' } } : x))
-        }
-      }))
-      return { ok, ko }
-    })()
-    toast.promise(promise, {
-      loading: `Publication Etsy de ${publishable.length} job(s)...`,
-      success: ({ ok, ko }) => `Publication terminée • ${ok} succès, ${ko} échec(s)`,
-      error: "Erreur pendant la publication",
-    })
+    // progress toast with remaining count
+    let ok = 0, ko = 0
+    const total = publishable.length
+    let remaining = total
+    const tid = toast.loading(`Publication Etsy • ${remaining} restant(s)`) // returns id
+    await Promise.allSettled(publishable.map(async (j) => {
+      try {
+        const { id: listingId } = await publishDraftFromParsed(j.result!, etsyPrice, etsyQuantity, { skipAuthCheck: true })
+        ok++
+        setJobs((prev) => prev.map((x) => x.id === j.id ? { ...x, publish: { status: 'done', listingId } } : x))
+      } catch (e: any) {
+        ko++
+        setJobs((prev) => prev.map((x) => x.id === j.id ? { ...x, publish: { status: 'error', error: e?.message || 'Erreur' } } : x))
+      } finally {
+        remaining--
+        toast.loading(`Publication Etsy • ${remaining} restant(s)`, { id: tid })
+      }
+    }))
+    toast.success(`Publication terminée • ${ok} succès, ${ko} échec(s)`, { id: tid })
   }
 
   function resetAll() {
