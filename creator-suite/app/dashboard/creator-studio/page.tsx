@@ -541,17 +541,15 @@ export default function BatchPage() {
           <div className="text-sm text-muted-foreground">Jobs</div>
           <div className="text-xs text-muted-foreground">{jobs.length} total • {jobs.filter(j => j.status === 'done').length} terminés</div>
         </div>
-        {selected.size > 0 && (
-          <div className="flex flex-wrap items-center gap-2 border rounded-md p-2 text-sm">
-            <div>{selected.size} sélectionné(s)</div>
-            <div className="ml-auto flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={selectAll}>Tout sélectionner</Button>
-              <Button variant="ghost" size="sm" onClick={clearSelection}>Tout désélectionner</Button>
-              <Button size="sm" variant="secondary" onClick={bulkDownloadZips} disabled={!jobs.some(j => selected.has(j.id) && j.zip)}>Télécharger ZIPs</Button>
-              <Button size="sm" onClick={bulkPublishDrafts} disabled={!jobs.some(j => selected.has(j.id) && j.result)}>Publier en Draft</Button>
-            </div>
+        <div className="flex flex-wrap items-center gap-2 border rounded-md p-2 text-sm">
+          <div>{selected.size} sélectionné(s)</div>
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={selectAll} disabled={!jobs.length}>Tout sélectionner</Button>
+            <Button variant="ghost" size="sm" onClick={clearSelection} disabled={selected.size === 0}>Tout désélectionner</Button>
+            <Button size="sm" variant="secondary" onClick={bulkDownloadZips} disabled={!jobs.some(j => selected.has(j.id) && j.zip)}>Télécharger ZIPs</Button>
+            <Button size="sm" onClick={bulkPublishDrafts} disabled={!jobs.some(j => selected.has(j.id) && j.result)}>Publier en Draft</Button>
           </div>
-        )}
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {jobs.map((j) => (
             <JobCard
