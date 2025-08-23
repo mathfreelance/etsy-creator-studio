@@ -11,6 +11,14 @@ import { Download, Image as ImageIcon, Images, Film, FileText, Copy } from "luci
 import type { ParsedPackage } from "@/lib/zip"
 import { toast } from "sonner"
 
+function formatBytes(bytes: number) {
+  if (bytes === 0) return "0 B"
+  const k = 1024
+  const sizes = ["B", "KB", "MB", "GB", "TB"]
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
+}
+
 export interface ResultsPanelProps {
   data: ParsedPackage
   onDownload?: () => void
@@ -205,6 +213,9 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
                 </Button>
               </div>
             </div>
+            {typeof data.processedImageSize === 'number' && (
+              <div className="text-xs text-muted-foreground">Taille: {formatBytes(data.processedImageSize)}</div>
+            )}
           </section>
         )}
 
@@ -231,6 +242,9 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
                     </div>
                   </div>
                   <div className="text-xs text-muted-foreground truncate">{m.name}</div>
+                  {typeof m.size === 'number' && (
+                    <div className="text-xs text-muted-foreground">Taille: {formatBytes(m.size)}</div>
+                  )}
                 </div>
               ))}
             </div>
@@ -258,6 +272,9 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
                 </Button>
               </div>
             </div>
+            {typeof data.videoSize === 'number' && (
+              <div className="text-xs text-muted-foreground">Taille: {formatBytes(data.videoSize)}</div>
+            )}
           </section>
         )}
 

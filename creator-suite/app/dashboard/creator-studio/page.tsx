@@ -29,7 +29,7 @@ export default function Page() {
   const [options, setOptions] = React.useState<Options>({
     dpi: 300,
     mockups: true,
-    video: false,
+    video: true,
     texts: {
       enabled: true,
       title: true,
@@ -38,7 +38,7 @@ export default function Page() {
       tags: true,
     },
     enhance: {
-      enabled: false,
+      enabled: true,
       scale: 2,
     },
   });
@@ -225,7 +225,7 @@ export default function Page() {
     setOptions({
       dpi: 300,
       mockups: true,
-      video: false,
+      video: true,
       texts: {
         enabled: true,
         title: true,
@@ -233,7 +233,7 @@ export default function Page() {
         description: true,
         tags: true,
       },
-      enhance: { enabled: false, scale: 2 },
+      enhance: { enabled: true, scale: 2 },
     });
     setResults(null);
     setZipBlob(null);

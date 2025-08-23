@@ -9,8 +9,10 @@ export type ParsedTexts = {
 
 export type ParsedPackage = {
   processedImageUrl?: string
-  mockups: Array<{ name: string; url: string }>
+  processedImageSize?: number
+  mockups: Array<{ name: string; url: string; size?: number }>
   videoUrl?: string
+  videoSize?: number
   texts?: ParsedTexts
   manifest?: any
   release: () => void
@@ -34,6 +36,7 @@ export async function parseProcessZip(zipBlob: Blob): Promise<ParsedPackage> {
     const url = URL.createObjectURL(b)
     urlsToRevoke.push(url)
     out.processedImageUrl = url
+    out.processedImageSize = b.size
   }
 
   // Mockups folder
@@ -44,7 +47,7 @@ export async function parseProcessZip(zipBlob: Blob): Promise<ParsedPackage> {
       const url = URL.createObjectURL(b)
       urlsToRevoke.push(url)
       const name = path.substring("mockups/".length)
-      out.mockups.push({ name, url })
+      out.mockups.push({ name, url, size: b.size })
     }
   }
 
@@ -55,6 +58,7 @@ export async function parseProcessZip(zipBlob: Blob): Promise<ParsedPackage> {
     const url = URL.createObjectURL(b)
     urlsToRevoke.push(url)
     out.videoUrl = url
+    out.videoSize = b.size
   }
 
   // Texts JSON
