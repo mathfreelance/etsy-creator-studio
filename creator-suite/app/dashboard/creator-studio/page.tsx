@@ -188,6 +188,8 @@ export default function BatchPage() {
   const [jobs, setJobs] = React.useState<Job[]>([])
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [dialogJobId, setDialogJobId] = React.useState<string | null>(null)
+  // Prevent duplicate starts (e.g., StrictMode, rapid schedule calls)
+  const startingRef = React.useRef<Set<string>>(new Set())
 
   React.useEffect(() => () => {
     // cleanup on unmount
@@ -255,6 +257,8 @@ export default function BatchPage() {
         try { j.result.release() } catch {}
       }
       try { if (j?.previewUrl) URL.revokeObjectURL(j.previewUrl) } catch {}
+      // clear idempotency guard if present
+      startingRef.current.delete(id)
       return prev.filter((x) => x.id !== id)
     })
     setSelected((prev) => {
@@ -285,7 +289,8 @@ export default function BatchPage() {
   function startQueued() {
     // Compute synchronously to avoid relying on setState ordering
     const running = jobs.filter((j) => j.status === "running").length
-    const capacity = Math.max(0, CONCURRENCY - running)
+    const active = Math.max(running, startingRef.current.size)
+    const capacity = Math.max(0, CONCURRENCY - active)
     if (capacity <= 0) return
     const toStart = jobs.filter((j) => j.status === "queued").slice(0, capacity)
     toStart.forEach((j) => startJob(j))
@@ -294,6 +299,12 @@ export default function BatchPage() {
   function startJob(job: Job) {
     const id = job.id
     const fileName = job.file.name
+    // Idempotency guard
+    if (startingRef.current.has(id)) return
+    // Double-check latest state says it's queued
+    const current = jobs.find((j) => j.id === id)
+    if (current && current.status !== "queued") return
+    startingRef.current.add(id)
     // mark as running immediately
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, status: "running" } : j)))
 
@@ -370,6 +381,8 @@ export default function BatchPage() {
         scheduleNext()
       } finally {
         try { es.close() } catch {}
+        // clear idempotency guard
+        startingRef.current.delete(id)
       }
     })()
   }
@@ -378,7 +391,8 @@ export default function BatchPage() {
     setJobs((prev) => {
       const running = prev.filter((j) => j.status === "running").length
       const queued = prev.filter((j) => j.status === "queued")
-      const capacity = Math.max(0, CONCURRENCY - running)
+      const active = Math.max(running, startingRef.current.size)
+      const capacity = Math.max(0, CONCURRENCY - active)
       const toStart = queued.slice(0, capacity)
       toStart.forEach((j) => startJob(j))
       return prev
@@ -392,6 +406,8 @@ export default function BatchPage() {
       abortProcess(j.rid).catch(() => {})
       try { j.es?.close() } catch {}
       try { j.controller?.abort() } catch {}
+      // clear idempotency guard when cancelling
+      startingRef.current.delete(id)
       return prev.map((x) => (x.id === id ? { ...x, status: "cancelled" } : x))
     })
   }
@@ -456,6 +472,8 @@ export default function BatchPage() {
       })
       return []
     })
+    // clear idempotency guard for all jobs
+    startingRef.current.clear()
     setOptions({ dpi: 300, mockups: true, video: true, texts: { enabled: true, title: true, alt: true, description: true, tags: true }, enhance: { enabled: true, scale: 4 } })
     setAutoPublish("off")
     setSelected(new Set())
