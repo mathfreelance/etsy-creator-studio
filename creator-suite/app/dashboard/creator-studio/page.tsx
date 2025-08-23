@@ -8,13 +8,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Image as ImageIcon, Settings } from "lucide-react";
+import { Image as ImageIcon, Settings, Play } from "lucide-react";
 import { ImageDropzone } from "@/components/dashboard/ImageDropzone";
 import {
   OptionsPanel,
   type Options,
 } from "@/components/dashboard/OptionsPanel";
 import { processImage, downloadBlob, abortProcess } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import { ResultsPanel } from "@/components/dashboard/ResultsPanel";
 import {
   ProgressPanel,
@@ -318,15 +319,21 @@ export default function Page() {
               Choisis la résolution et les contenus à inclure
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-6">
             <OptionsPanel
-              hasImage={!!selectedImage}
               value={options}
               onChange={setOptions}
-              onContinue={handleContinue}
-              onReset={handleReset}
-              loading={isProcessing}
             />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Button type="button" onClick={handleContinue} disabled={!selectedImage || isProcessing}>
+                  <Play className="size-4 mr-2" /> Lancer le traitement
+                </Button>
+              </div>
+              <Button type="button" variant="ghost" onClick={handleReset}>
+                Réinitialiser
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>

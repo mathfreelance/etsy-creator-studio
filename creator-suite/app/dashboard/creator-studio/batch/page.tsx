@@ -456,6 +456,7 @@ export default function BatchPage() {
     })
     setOptions({ dpi: 300, mockups: true, video: true, texts: { enabled: true, title: true, alt: true, description: true, tags: true }, enhance: { enabled: true, scale: 4 } })
     setAutoPublish("off")
+    setSelected(new Set())
   }
 
   const currentDialogJob = React.useMemo(() => jobs.find((j) => j.id === dialogJobId) || null, [jobs, dialogJobId])
@@ -491,12 +492,8 @@ export default function BatchPage() {
           </CardHeader>
           <CardContent className="space-y-6">
             <OptionsPanel
-              hasImage={hasFiles}
               value={options}
               onChange={setOptions}
-              onContinue={startQueued}
-              onReset={resetAll}
-              loading={runningCount > 0}
             />
 
             <div className="space-y-2">
@@ -514,11 +511,16 @@ export default function BatchPage() {
               <p className="text-xs text-muted-foreground">Non activé par défaut. Si activé, chaque image terminée crée un draft Etsy automatiquement.</p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button type="button" onClick={startQueued} disabled={!jobs.some(j => j.status === 'queued') || runningCount >= CONCURRENCY}>
-                <Play className="size-4 mr-2" /> Lancer le traitement
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Button type="button" onClick={startQueued} disabled={!jobs.some(j => j.status === 'queued') || runningCount >= CONCURRENCY}>
+                  <Play className="size-4 mr-2" /> Lancer le traitement
+                </Button>
+                <div className="text-xs text-muted-foreground">Concurrence: {runningCount}/{CONCURRENCY}</div>
+              </div>
+              <Button type="button" variant="ghost" onClick={resetAll}>
+                Réinitialiser
               </Button>
-              <div className="text-xs text-muted-foreground">Concurrence: {runningCount}/{CONCURRENCY}</div>
             </div>
           </CardContent>
         </Card>
@@ -685,14 +687,27 @@ function JobCard({ job, onOpen, onCancel, onRemove, onDownloadZip, onPublish, se
   selected: boolean
   onToggleSelect: (checked: boolean | "indeterminate") => void
 }) {
-  const isClickable = job.status === 'done' && !!job.result
   return (
-    <div className="rounded-xl border overflow-hidden bg-card">
+    <div
+      className={"rounded-xl border overflow-hidden bg-card cursor-pointer " + (selected ? "ring-2 ring-primary" : "")}
+      onClick={() => onToggleSelect(!selected)}
+      role="button"
+      aria-pressed={selected}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault()
+          onToggleSelect(!selected)
+        }
+      }}
+    >
       <div className="relative">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={job.result?.processedImageUrl || job.previewUrl} alt={job.file.name} className="w-full aspect-[4/3] object-cover" />
         <div className="absolute top-2 left-2 flex items-center gap-2">
-          <Checkbox checked={selected} onCheckedChange={onToggleSelect} />
+          <span onClick={(e) => e.stopPropagation()}>
+            <Checkbox checked={selected} onCheckedChange={onToggleSelect} />
+          </span>
           <Badge variant="secondary" className="capitalize">{job.status}</Badge>
           {job.publish.status !== 'idle' && (
             <Badge variant={job.publish.status === 'done' ? 'default' : job.publish.status === 'error' ? 'destructive' : 'secondary'}>
@@ -701,7 +716,7 @@ function JobCard({ job, onOpen, onCancel, onRemove, onDownloadZip, onPublish, se
           )}
         </div>
       </div>
-      <div className="p-3 flex items-center justify-between gap-2">
+      <div className="p-3 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
         <div className="truncate text-sm" title={job.file.name}>{job.file.name}</div>
         <div className="flex items-center gap-2">
           {job.status === 'running' && (

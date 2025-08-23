@@ -5,7 +5,6 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Button } from "@/components/ui/button"
 
 export type DPI = 72 | 150 | 300 | 600
 
@@ -27,15 +26,11 @@ export interface Options {
 }
 
 export interface OptionsPanelProps {
-  hasImage: boolean
   value: Options
   onChange: (next: Options) => void
-  onContinue: () => void
-  onReset: () => void
-  loading?: boolean
 }
 
-export function OptionsPanel({ hasImage, value, onChange, onContinue, onReset, loading }: OptionsPanelProps) {
+export function OptionsPanel({ value, onChange }: OptionsPanelProps) {
   function setDpi(next: DPI) {
     onChange({ ...value, dpi: next })
   }
@@ -150,14 +145,7 @@ export function OptionsPanel({ hasImage, value, onChange, onContinue, onReset, l
         </div>
       )}*/}
 
-      <div className="flex items-center justify-between">
-        <Button type="button" variant="ghost" onClick={onReset}>
-          Réinitialiser
-        </Button>
-        <Button type="button" onClick={onContinue} disabled={!hasImage || Boolean(loading)}>
-          {loading ? "Traitement…" : "Continuer"}
-        </Button>
-      </div>
+      {/** Controls moved to parent card. This panel now only exposes options. **/}
     </div>
   )
 }
