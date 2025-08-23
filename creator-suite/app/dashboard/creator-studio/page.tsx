@@ -14,7 +14,7 @@ import {
   OptionsPanel,
   type Options,
 } from "@/components/dashboard/OptionsPanel";
-import { processImage, downloadBlob } from "@/lib/api";
+import { processImage, downloadBlob, abortProcess } from "@/lib/api";
 import { ResultsPanel } from "@/components/dashboard/ResultsPanel";
 import {
   ProgressPanel,
@@ -59,6 +59,7 @@ export default function Page() {
   // Progress (SSE)
   const [rid, setRid] = React.useState<string | null>(null);
   const esRef = React.useRef<EventSource | null>(null);
+  const abortRef = React.useRef<AbortController | null>(null);
   const [stepOrder, setStepOrder] = React.useState<StepKey[]>([]);
   const [stepStatus, setStepStatus] = React.useState<
     Record<string, "pending" | "started" | "done">
@@ -139,10 +140,17 @@ export default function Page() {
             es.close();
           } catch {}
         } else if (payload.event === "error") {
-          toast.error(`Erreur étape ${payload.step || ""}`.trim());
-          try {
-            es.close();
-          } catch {}
+          if (payload.step === "abort") {
+            // Silent close for user-cancelled flow
+            try {
+              es.close();
+            } catch {}
+          } else {
+            toast.error(`Erreur étape ${payload.step || ""}`.trim());
+            try {
+              es.close();
+            } catch {}
+          }
         }
       } catch {
         // ignore parse errors
@@ -179,7 +187,36 @@ export default function Page() {
       setRid(newRid);
       startProgress(newRid, options);
 
-      const promise = processImage({
+      // Setup abort controller and cancellable toast
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const toastId = toast.loading("Traitement en cours…", {
+        duration: Infinity,
+        action: {
+          label: "Annuler",
+          onClick: async () => {
+            try {
+              if (newRid) await abortProcess(newRid);
+            } finally {
+              try {
+                if (esRef.current) esRef.current.close();
+              } catch {}
+              esRef.current = null;
+              try {
+                abortRef.current?.abort();
+              } catch {}
+              setIsProcessing(false);
+              setRid(null);
+              setStepOrder([]);
+              setStepStatus({});
+              toast.dismiss(toastId);
+              toast.message("Traitement annulé");
+            }
+          },
+        },
+      });
+
+      const { blob, filename } = await processImage({
         file: selectedImage,
         dpi: options.dpi,
         mockups: options.mockups,
@@ -188,24 +225,27 @@ export default function Page() {
         enhance: options.enhance.enabled,
         upscale: options.enhance.scale,
         rid: newRid,
+        signal: controller.signal,
       });
-      toast.promise(promise, {
-        loading: "Traitement en cours…",
-        success: "Traitement terminé",
-        error: (err: any) =>
-          typeof err?.message === "string"
-            ? err.message
-            : "Erreur pendant le traitement",
-      });
-      const { blob, filename } = await promise;
+      toast.dismiss(toastId);
+      toast.success("Traitement terminé");
       const parsed = await parseProcessZip(blob);
       setResults(parsed);
       setZipBlob(blob);
       setZipFilename(filename);
     } catch (err: any) {
-      // toast.promise handles error display
+      if (err?.name === "AbortError" || err?.message === "Cancelled") {
+        // already handled by the cancel action
+      } else {
+        toast.error(
+          typeof err?.message === "string"
+            ? err.message
+            : "Erreur pendant le traitement"
+        );
+      }
     } finally {
       setIsProcessing(false);
+      abortRef.current = null;
     }
   }
 

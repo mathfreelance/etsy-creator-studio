@@ -23,6 +23,12 @@ _PROG_CHANNELS: Dict[str, Set[asyncio.Queue]] = {}
 _PROG_LOCK = asyncio.Lock()
 _PROG_STATE: Dict[str, Dict[str, Any]] = {}
 
+# In-memory cancellation flags keyed by rid
+_CANCELLED_RIDS: Set[str] = set()
+
+def _is_cancelled(rid: str | None) -> bool:
+    return bool(rid and rid in _CANCELLED_RIDS)
+
 async def _push_progress(rid: str | None, payload: Dict[str, Any]) -> None:
     """Push a progress payload to all SSE subscribers for the given rid."""
     if not rid:
@@ -107,6 +113,20 @@ async def process_stream(rid: str | None = None):
         "Connection": "keep-alive",
     })
 
+@router.post("/process/abort")
+async def process_abort(rid: str | None = None):
+    """Mark a running process (by rid) as cancelled.
+
+    Frontend should pass the same rid used to start processing. Processing will
+    best-effort stop at safe checkpoints.
+    """
+    if not rid:
+        raise HTTPException(status_code=400, detail="rid is required")
+    _CANCELLED_RIDS.add(rid)
+    # Notify listeners
+    await _push_progress(rid, {"event": "error", "step": "abort", "detail": "Cancelled by user"})
+    return {"ok": True}
+
 @router.post("/process")
 async def process(
     image: UploadFile = File(...),
@@ -135,6 +155,8 @@ async def process(
     if not raw:
         raise HTTPException(status_code=400, detail="Empty image upload")
     await _push_progress(rid, {"event": "started"})
+    if _is_cancelled(rid):
+        raise HTTPException(status_code=499, detail="Cancelled")
 
     files: List[Tuple[str, bytes]] = []
     manifest: Dict[str, Any] = {
@@ -194,6 +216,8 @@ async def process(
     except Exception as e:
         logger.exception("[process] Enhance/DPI failed")
         raise HTTPException(status_code=500, detail=f"Enhance/DPI failed: {e}")
+    if _is_cancelled(rid):
+        raise HTTPException(status_code=499, detail="Cancelled")
 
     # 2) Kick off mockups (and texts already running) in parallel, then do video (depends on mockups)
     mockup_bytes: List[bytes] = []
@@ -224,6 +248,8 @@ async def process(
             logger.exception("[process] Mockups failed")
             await _push_progress(rid, {"event": "error", "step": "mockups", "detail": str(e)})
             raise HTTPException(status_code=500, detail=f"Mockups failed: {e}")
+        if _is_cancelled(rid):
+            raise HTTPException(status_code=499, detail="Cancelled")
 
     # 3) Video (after mockups)
     if video:
@@ -241,6 +267,8 @@ async def process(
             logger.exception("[process] Video failed")
             await _push_progress(rid, {"event": "error", "step": "video", "detail": str(e)})
             raise HTTPException(status_code=500, detail=f"Video failed: {e}")
+        if _is_cancelled(rid):
+            raise HTTPException(status_code=499, detail="Cancelled")
 
     # 4) Texts (await if started)
     if texts_task:
@@ -258,6 +286,8 @@ async def process(
             logger.exception("[process] Texts failed")
             await _push_progress(rid, {"event": "error", "step": "texts", "detail": str(e)})
             raise HTTPException(status_code=500, detail=f"Texts failed: {e}")
+        if _is_cancelled(rid):
+            raise HTTPException(status_code=499, detail="Cancelled")
 
     # 5) Manifest
     files.append((
@@ -271,6 +301,10 @@ async def process(
     logger.info(f"[process] zip built with {len(files)} files in {time.perf_counter()-t_zip:.2f}s; total={time.perf_counter()-t_start:.2f}s")
     await _push_progress(rid, {"event": "step", "step": "zip", "status": "done", "files": len(files)})
     await _push_progress(rid, {"event": "done"})
+
+    # Clear cancellation flag (if any)
+    if rid:
+        _CANCELLED_RIDS.discard(rid)
 
     return StreamingResponse(iter([zip_bytes]), media_type="application/zip", headers={
         "Content-Disposition": "attachment; filename=package.zip"

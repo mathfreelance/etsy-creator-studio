@@ -7,6 +7,7 @@ export type ProcessParams = {
   enhance?: boolean
   upscale?: 2 | 4
   rid?: string
+  signal?: AbortSignal
 }
 
 export type ProcessResult = {
@@ -15,7 +16,7 @@ export type ProcessResult = {
 }
 
 export async function processImage(params: ProcessParams): Promise<ProcessResult> {
-  const { file, dpi, mockups, video, texts, enhance = false, upscale = 2, rid } = params
+  const { file, dpi, mockups, video, texts, enhance = false, upscale = 2, rid, signal } = params
 
   const fd = new FormData()
   fd.append('image', file)
@@ -31,9 +32,13 @@ export async function processImage(params: ProcessParams): Promise<ProcessResult
   const res = await fetch(`/api/process`, {
     method: 'POST',
     body: fd,
+    signal,
   })
 
   if (!res.ok) {
+    if (res.status === 499) {
+      throw new Error('Cancelled')
+    }
     try {
       const data = await res.json()
       const detail = data?.detail || res.statusText
@@ -72,4 +77,13 @@ function parseContentDisposition(value: string | null | undefined): string | und
     }
   }
   return undefined
+}
+
+export async function abortProcess(rid: string): Promise<void> {
+  if (!rid) return
+  try {
+    await fetch(`/api/process/abort?rid=${encodeURIComponent(rid)}`, { method: 'POST' })
+  } catch {
+    // ignore network errors; best-effort
+  }
 }
