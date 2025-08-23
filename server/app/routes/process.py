@@ -137,6 +137,7 @@ async def process(
     video: bool = Form(False),
     texts: bool = Form(False),
     rid: str | None = Form(None),
+    context: str | None = Form(None),
 ):
     """Process an uploaded image and return a ZIP package.
 
@@ -166,12 +167,13 @@ async def process(
         "mockups": mockups,
         "video": video,
         "texts": texts,
+        "context": context,
         "generated": [],
     }
 
     logger.info(
         f"[process] start filename={getattr(image, 'filename', None)} dpi={dpi} "
-        f"enhance={enhance} upscale={upscale} mockups={mockups} video={video} texts={texts}"
+        f"enhance={enhance} upscale={upscale} mockups={mockups} video={video} texts={texts} has_ctx={bool(context and context.strip())}"
     )
     # Mark image step as started as soon as processing begins
     await _push_progress(rid, {"event": "step", "step": "image", "status": "started"})
@@ -182,7 +184,7 @@ async def process(
         if not os.getenv("OPENAI_API_KEY"):
             raise HTTPException(status_code=400, detail="OPENAI_API_KEY not configured")
         logger.info("[process] starting text generation (from raw input)…")
-        texts_task = asyncio.create_task(asyncio.to_thread(generate_texts, raw))
+        texts_task = asyncio.create_task(asyncio.to_thread(generate_texts, raw, context))
         await _push_progress(rid, {"event": "step", "step": "texts", "status": "started"})
 
     # 1) Enhance / ensure DPI

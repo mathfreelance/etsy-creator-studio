@@ -12,7 +12,8 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Image as ImageIcon, Loader2, Download, Trash2, Eye, Settings, X } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { Image as ImageIcon, Loader2, Download, Trash2, Eye, Settings, X, FileText } from "lucide-react"
 
 import { HeaderTitle } from "@/components/contexts/header-title-context"
 import { OptionsPanel, type Options } from "@/components/dashboard/OptionsPanel"
@@ -49,6 +50,7 @@ type Job = {
   zipFilename?: string
   error?: string
   publish: PublishState
+  context?: string
 }
 
 function computeSteps(opts: Options): StepKey[] {
@@ -291,6 +293,10 @@ export default function BatchPage() {
     setSelected(new Set())
   }
 
+  function setContext(id: string, value: string) {
+    setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, context: value } : j)))
+  }
+
   function startQueued() {
     // Compute synchronously to avoid relying on setState ordering
     const running = jobs.filter((j) => j.status === "running").length
@@ -353,6 +359,7 @@ export default function BatchPage() {
           enhance: options.enhance.enabled,
           upscale: options.enhance.scale,
           rid,
+          context: job.context,
           signal: controller.signal,
         })
         const parsed = await parseProcessZip(blob)
@@ -504,7 +511,7 @@ export default function BatchPage() {
             <CardDescription>Dépose une ou plusieurs images (JPG, PNG, WEBP, max 15 Mo chacune). Tu peux en retirer.</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col">
-            <MultiImageDropzone onFiles={addFiles} jobs={jobs} onRemove={removeJob} />
+            <MultiImageDropzone onFiles={addFiles} jobs={jobs} onRemove={removeJob} onChangeContext={setContext} />
           </CardContent>
         </Card>
 
@@ -600,9 +607,23 @@ export default function BatchPage() {
   )
 }
 
-function MultiImageDropzone({ onFiles, jobs, onRemove }: { onFiles: (files: FileList | null) => void; jobs: Job[]; onRemove: (id: string) => void }) {
+function MultiImageDropzone({ onFiles, jobs, onRemove, onChangeContext }: { onFiles: (files: FileList | null) => void; jobs: Job[]; onRemove: (id: string) => void; onChangeContext: (id: string, context: string) => void }) {
   const [isDragging, setIsDragging] = React.useState(false)
   const inputRef = React.useRef<HTMLInputElement | null>(null)
+  const [ctxOpen, setCtxOpen] = React.useState(false)
+  const [ctxJobId, setCtxJobId] = React.useState<string | null>(null)
+  const [ctxValue, setCtxValue] = React.useState("")
+
+  function openContext(job: Job) {
+    setCtxJobId(job.id)
+    setCtxValue(job.context || "")
+    setCtxOpen(true)
+  }
+
+  function saveContext() {
+    if (ctxJobId) onChangeContext(ctxJobId, ctxValue)
+    setCtxOpen(false)
+  }
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault()
@@ -696,6 +717,18 @@ function MultiImageDropzone({ onFiles, jobs, onRemove }: { onFiles: (files: File
                       <Trash2 className="size-4" />
                     </Button>
                   )}
+                  {/* Context edit icon below trash */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="absolute top-12 right-2 h-8 w-8"
+                    onClick={() => openContext(j)}
+                    aria-label={j.context ? 'Modifier le contexte' : 'Ajouter un contexte'}
+                    title={j.context ? 'Modifier le contexte' : 'Ajouter un contexte'}
+                  >
+                    <FileText className={"size-4 " + (j.context ? "text-primary" : "")} />
+                  </Button>
                   <div className="grid grid-cols-[auto,1fr] items-center gap-3">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={j.previewUrl} alt={j.file.name} className="size-16 rounded object-cover border" />
@@ -726,6 +759,26 @@ function MultiImageDropzone({ onFiles, jobs, onRemove }: { onFiles: (files: File
           </div>
         </div>
       )}
+      {/* Context dialog */}
+      <Dialog open={ctxOpen} onOpenChange={setCtxOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Contexte IA (optionnel)</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Textarea
+              value={ctxValue}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCtxValue(e.target.value)}
+              placeholder="Ajoute un court contexte pour orienter la génération de texte (ex: destination, ambiance, mot-clés)."
+              rows={4}
+            />
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setCtxOpen(false)}>Annuler</Button>
+              <Button type="button" onClick={saveContext}>Enregistrer</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

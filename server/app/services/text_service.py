@@ -103,7 +103,7 @@ def _build_description(intro: str, love: str) -> str:
     return DESCRIPTION_TMPL.format(intro=intro.strip(), love=love.strip())
 
 
-def generate_texts(image_bytes: bytes) -> Dict[str, Any]:
+def generate_texts(image_bytes: bytes, context: str | None = None) -> Dict[str, Any]:
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY not set")
 
@@ -119,9 +119,21 @@ def generate_texts(image_bytes: bytes) -> Dict[str, Any]:
                 "type": "text",
                 "text": "Previous output violated constraints:\n- " + "\n- ".join(corrections) + "\nReturn corrected JSON now."
             })
+            if context and context.strip():
+                user_content.append({
+                    "type": "text",
+                    "text": f"Reminder — user context: {context.strip()}"
+                })
         else:
             user_content.append({"type": "text", "text": USER_INSTRUCTIONS})
+            if context and context.strip():
+                user_content.append({
+                    "type": "text",
+                    "text": f"Additional context from user: {context.strip()}"
+                })
         user_content.append({"type": "image_url", "image_url": {"url": data_url, "detail": DETAIL}})
+
+        print("user_content:", user_content)
 
         resp = client.chat.completions.create(
             model=MODEL,
