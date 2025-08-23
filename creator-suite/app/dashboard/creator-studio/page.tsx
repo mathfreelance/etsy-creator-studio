@@ -183,6 +183,8 @@ export default function BatchPage() {
     enhance: { enabled: true, scale: 4 },
   })
   const [autoPublish, setAutoPublish] = React.useState<"off" | "draft">("off")
+  const [etsyPrice, setEtsyPrice] = React.useState<string>("5.00")
+  const [etsyQuantity, setEtsyQuantity] = React.useState<string>("10")
   const [jobs, setJobs] = React.useState<Job[]>([])
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [dialogJobId, setDialogJobId] = React.useState<string | null>(null)
@@ -345,7 +347,7 @@ export default function BatchPage() {
         // auto-publish if enabled
         if (autoPublish === "draft") {
           setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, publish: { status: "pending" } } : j)))
-          const p = publishDraftFromParsed(parsed)
+          const p = publishDraftFromParsed(parsed, etsyPrice, etsyQuantity)
           toast.promise(p, {
             loading: `${fileName}: publication Etsy...`,
             success: ({ id: listingId }: any) => `${fileName}: draft Etsy créé${listingId ? ` (#${listingId})` : ''}`,
@@ -424,7 +426,7 @@ export default function BatchPage() {
       let ok = 0, ko = 0
       await Promise.allSettled(publishable.map(async (j) => {
         try {
-          const { id: listingId } = await publishDraftFromParsed(j.result!)
+          const { id: listingId } = await publishDraftFromParsed(j.result!, etsyPrice, etsyQuantity)
           ok++
           setJobs((prev) => prev.map((x) => x.id === j.id ? { ...x, publish: { status: 'done', listingId } } : x))
         } catch (e: any) {
@@ -494,6 +496,9 @@ export default function BatchPage() {
             <OptionsPanel
               value={options}
               onChange={setOptions}
+              etsyPrice={etsyPrice}
+              etsyQuantity={etsyQuantity}
+              onChangeEtsy={({ price, quantity }) => { setEtsyPrice(price); setEtsyQuantity(quantity) }}
             />
 
             <div className="space-y-2">
@@ -555,7 +560,7 @@ export default function BatchPage() {
               onPublish={async () => {
                 if (!j.result) return
                 setJobs((prev) => prev.map((x) => x.id === j.id ? { ...x, publish: { status: 'pending' } } : x))
-                const p = publishDraftFromParsed(j.result)
+                const p = publishDraftFromParsed(j.result, etsyPrice, etsyQuantity)
                 toast.promise(p, {
                   loading: `${j.file.name}: publication Etsy...`,
                   success: ({ id }: any) => `${j.file.name}: draft Etsy créé${id ? ` (#${id})` : ''}`,

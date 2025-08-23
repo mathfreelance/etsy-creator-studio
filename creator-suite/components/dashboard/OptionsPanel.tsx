@@ -2,6 +2,8 @@
 
 import React from "react"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -28,9 +30,42 @@ export interface Options {
 export interface OptionsPanelProps {
   value: Options
   onChange: (next: Options) => void
+  etsyPrice: string
+  etsyQuantity: string
+  onChangeEtsy: (next: { price: string; quantity: string }) => void
 }
 
-export function OptionsPanel({ value, onChange }: OptionsPanelProps) {
+export function OptionsPanel({ value, onChange, etsyPrice, etsyQuantity, onChangeEtsy }: OptionsPanelProps) {
+  const [etsyConnected, setEtsyConnected] = React.useState<boolean>(false)
+
+  React.useEffect(() => {
+    try {
+      const v = localStorage.getItem("etsy_connected")
+      setEtsyConnected(v === "true")
+    } catch {}
+    ;(async () => {
+      try {
+        const r = await fetch("/api/etsy/auth/status", { cache: "no-store" })
+        if (r.ok) {
+          const j = await r.json()
+          setEtsyConnected(!!j?.connected)
+          try { localStorage.setItem("etsy_connected", j?.connected ? "true" : "false") } catch {}
+        }
+      } catch {}
+    })()
+    const onMsg = (ev: MessageEvent) => {
+      if (ev?.data?.type === "etsyConnected") {
+        try { localStorage.setItem("etsy_connected", "true") } catch {}
+        setEtsyConnected(true)
+      }
+    }
+    window.addEventListener("message", onMsg)
+    return () => window.removeEventListener("message", onMsg)
+  }, [])
+
+  function openSettings() {
+    try { window.dispatchEvent(new Event('open-settings')) } catch {}
+  }
   function setDpi(next: DPI) {
     onChange({ ...value, dpi: next })
   }
@@ -105,6 +140,39 @@ export function OptionsPanel({ value, onChange }: OptionsPanelProps) {
               <SelectItem value="4">x4</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+      </div>
+
+      {/* Etsy settings */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="font-medium">Etsy</div>
+          <div className={`text-xs ${etsyConnected ? "text-green-600" : "text-muted-foreground"}`}>
+            {etsyConnected ? "Connecté" : "Non connecté"}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="price">Prix (EUR)</Label>
+            <Input
+              id="price"
+              value={etsyPrice}
+              onChange={(e) => onChangeEtsy({ price: e.target.value, quantity: etsyQuantity })}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="qty">Quantité</Label>
+            <Input
+              id="qty"
+              value={etsyQuantity}
+              onChange={(e) => onChangeEtsy({ price: etsyPrice, quantity: e.target.value })}
+            />
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" type="button" onClick={openSettings}>
+            {etsyConnected ? "Reconnecter Etsy" : "Connecter Etsy"}
+          </Button>
         </div>
       </div>
 
