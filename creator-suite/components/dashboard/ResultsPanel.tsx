@@ -30,6 +30,7 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
   const [creating, setCreating] = React.useState<boolean>(false)
   const [price, setPrice] = React.useState<string>("5.00")
   const [quantity, setQuantity] = React.useState<string>("10")
+  const [processedJpegSize, setProcessedJpegSize] = React.useState<number | null>(null)
 
   React.useEffect(() => {
     try {
@@ -85,6 +86,79 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
     openSettings()
   }
 
+  // Convert any image Blob to JPEG via canvas (fills white background for alpha)
+  async function toJpeg(blob: Blob, quality = 1): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      const url = URL.createObjectURL(blob)
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = img.naturalWidth
+          canvas.height = img.naturalHeight
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            reject(new Error('Canvas non supporté'))
+            return
+          }
+          // Fill background white to avoid black where alpha exists
+          ctx.fillStyle = '#ffffff'
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          ctx.drawImage(img, 0, 0)
+          canvas.toBlob((b) => {
+            if (!b) {
+              reject(new Error('Conversion JPEG échouée'))
+              return
+            }
+            resolve(b)
+          }, 'image/jpeg', quality)
+        } finally {
+          URL.revokeObjectURL(url)
+        }
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(url)
+        reject(new Error('Chargement image échoué'))
+      }
+      img.src = url
+    })
+  }
+
+  // Compute JPEG size (quality 100%) for display purposes
+  React.useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (!data.processedImageUrl) {
+        setProcessedJpegSize(null)
+        return
+      }
+      try {
+        const src = await fetch(data.processedImageUrl).then((r) => r.blob())
+        const jpeg = await toJpeg(src, 1)
+        if (!cancelled) setProcessedJpegSize(jpeg.size)
+      } catch {
+        if (!cancelled) setProcessedJpegSize(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [data.processedImageUrl])
+
+  async function downloadProcessedAsJpeg() {
+    if (!data.processedImageUrl) return
+    try {
+      const src = await fetch(data.processedImageUrl).then((r) => r.blob())
+      const jpeg = await toJpeg(src, 1)
+      const url = URL.createObjectURL(jpeg)
+      downloadUrl(url, 'digital.jpg')
+      // Cleanup shortly after triggering download
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch {
+      toast.error('Téléchargement impossible')
+    }
+  }
+
   async function createEtsyDraft() {
     if (!data.processedImageUrl) {
       toast.error("Aucune image traitée disponible")
@@ -105,14 +179,17 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
     } catch {}
     setCreating(true)
     const promise = (async () => {
-      const blob = await fetch(data.processedImageUrl!).then((r) => r.blob())
-      if (blob.size > 20 * 1024 * 1024) {
-        throw new Error("Le fichier digital dépasse 20 Mo")
+      const srcBlob = await fetch(data.processedImageUrl!).then((r) => r.blob())
+      // Convert to JPEG (qualité 100%) pour meilleure compatibilité Etsy et poids réduit
+      const jpegBlob = await toJpeg(srcBlob, 1)
+      if (jpegBlob.size > 20 * 1024 * 1024) {
+        throw new Error("Le fichier digital dépasse 20 Mo après conversion JPEG")
       }
       const fd = new FormData()
-      fd.append("processed", new File([blob], "processed.png", { type: "image/png" }))
-      // Use the same image as listing image by default
-      fd.append("image", new File([blob], "image.png", { type: "image/png" }))
+      // Digital file delivered to customers
+      fd.append("processed", new File([jpegBlob], "digital.jpg", { type: "image/jpeg" }))
+      // Use the same as listing image by default
+      fd.append("image", new File([jpegBlob], "image.jpg", { type: "image/jpeg" }))
 
       const texts = data.texts
       if (texts?.title) fd.append("title", texts.title)
@@ -203,22 +280,23 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
               <img src={data.processedImageUrl} alt="Processed" className="w-full rounded-lg border" />
               <div className="pointer-events-none absolute top-2 right-2 hidden group-hover:block">
                 <Button
-                  aria-label="Télécharger l'image améliorée"
+                  aria-label="Télécharger l'image (JPEG)"
                   className="pointer-events-auto h-8 w-8 p-0 rounded-full shadow"
                   size="sm"
                   variant="secondary"
-                  onClick={() => downloadUrl(data.processedImageUrl!, 'processed.png')}
+                  onClick={downloadProcessedAsJpeg}
                 >
                   <Download className="size-4" />
                 </Button>
               </div>
             </div>
-            {typeof data.processedImageSize === 'number' && (
-              <div className="text-xs text-muted-foreground">Taille: {formatBytes(data.processedImageSize)}</div>
+            {(typeof processedJpegSize === 'number' || typeof data.processedImageSize === 'number') && (
+              <div className="text-xs text-muted-foreground">
+                Taille: {formatBytes((processedJpegSize ?? data.processedImageSize!) as number)}
+              </div>
             )}
           </section>
         )}
-
         {data.mockups?.length > 0 && (
           <section className="space-y-2">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
