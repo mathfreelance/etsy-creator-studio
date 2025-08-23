@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Play } from "lucide-react"
 
 export type DPI = 72 | 150 | 300 | 600
 
@@ -33,9 +35,29 @@ export interface OptionsPanelProps {
   etsyPrice: string
   etsyQuantity: string
   onChangeEtsy: (next: { price: string; quantity: string }) => void
+  autoPublish: "off" | "draft"
+  onChangeAutoPublish: (next: "off" | "draft") => void
+  runningCount: number
+  concurrency: number
+  startDisabled: boolean
+  onStartQueued: () => void
+  onResetAll: () => void
 }
 
-export function OptionsPanel({ value, onChange, etsyPrice, etsyQuantity, onChangeEtsy }: OptionsPanelProps) {
+export function OptionsPanel({
+  value,
+  onChange,
+  etsyPrice,
+  etsyQuantity,
+  onChangeEtsy,
+  autoPublish,
+  onChangeAutoPublish,
+  runningCount,
+  concurrency,
+  startDisabled,
+  onStartQueued,
+  onResetAll,
+}: OptionsPanelProps) {
   const [etsyConnected, setEtsyConnected] = React.useState<boolean>(false)
 
   React.useEffect(() => {
@@ -80,7 +102,7 @@ export function OptionsPanel({ value, onChange, etsyPrice, etsyQuantity, onChang
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-1 min-h-0 flex-col gap-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="flex flex-col gap-2">
           <Label htmlFor="dpi">DPI</Label>
@@ -174,6 +196,34 @@ export function OptionsPanel({ value, onChange, etsyPrice, etsyQuantity, onChang
             {etsyConnected ? "Reconnecter Etsy" : "Connecter Etsy"}
           </Button>
         </div>
+      </div>
+
+      {/* Publication Etsy controls (moved from parent) */}
+      <div className="space-y-2">
+        <Label>Publication Etsy</Label>
+        <RadioGroup value={autoPublish} onValueChange={(v) => onChangeAutoPublish(v as "off" | "draft")} className="grid grid-cols-2 gap-3">
+          <label className="flex items-center gap-2 rounded-md border p-3 cursor-pointer">
+            <RadioGroupItem value="off" />
+            <span className="text-sm">Désactivé</span>
+          </label>
+          <label className="flex items-center gap-2 rounded-md border p-3 cursor-pointer">
+            <RadioGroupItem value="draft" />
+            <span className="text-sm">Auto-publier en Draft</span>
+          </label>
+        </RadioGroup>
+        <p className="text-xs text-muted-foreground">Non activé par défaut. Si activé, chaque image terminée crée un draft Etsy automatiquement.</p>
+      </div>
+
+      <div className="mt-auto flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Button type="button" onClick={onStartQueued} disabled={startDisabled}>
+            <Play className="size-4 mr-2" /> Lancer le traitement
+          </Button>
+          <div className="text-xs text-muted-foreground">Concurrence: {runningCount}/{concurrency}</div>
+        </div>
+        <Button type="button" variant="ghost" onClick={onResetAll}>
+          Réinitialiser
+        </Button>
       </div>
 
       {/*{value.texts.enabled && (

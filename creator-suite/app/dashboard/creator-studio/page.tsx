@@ -10,11 +10,9 @@ import {
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Image as ImageIcon, Loader2, Download, Trash2, Eye, Settings, Play, X } from "lucide-react"
+import { Image as ImageIcon, Loader2, Download, Trash2, Eye, Settings, X } from "lucide-react"
 
 import { HeaderTitle } from "@/components/contexts/header-title-context"
 import { OptionsPanel, type Options } from "@/components/dashboard/OptionsPanel"
@@ -510,48 +508,29 @@ export default function BatchPage() {
           </CardContent>
         </Card>
 
-        <Card className="rounded-2xl">
+        <Card className="rounded-2xl h-full flex flex-col">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Settings className="size-4" /> Options
             </CardTitle>
             <CardDescription>Options globales appliquées à tous les jobs</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-6 flex-1 flex flex-col">
             <OptionsPanel
               value={options}
               onChange={setOptions}
               etsyPrice={etsyPrice}
               etsyQuantity={etsyQuantity}
               onChangeEtsy={({ price, quantity }) => { setEtsyPrice(price); setEtsyQuantity(quantity) }}
+              autoPublish={autoPublish}
+              onChangeAutoPublish={(v) => setAutoPublish(v)}
+              runningCount={runningCount}
+              concurrency={CONCURRENCY}
+              startDisabled={!jobs.some(j => j.status === 'queued') || runningCount >= CONCURRENCY}
+              onStartQueued={startQueued}
+              onResetAll={resetAll}
             />
 
-            <div className="space-y-2">
-              <Label>Publication Etsy</Label>
-              <RadioGroup value={autoPublish} onValueChange={(v) => setAutoPublish(v as any)} className="grid grid-cols-2 gap-3">
-                <label className="flex items-center gap-2 rounded-md border p-3 cursor-pointer">
-                  <RadioGroupItem value="off" />
-                  <span className="text-sm">Désactivé</span>
-                </label>
-                <label className="flex items-center gap-2 rounded-md border p-3 cursor-pointer">
-                  <RadioGroupItem value="draft" />
-                  <span className="text-sm">Auto-publier en Draft</span>
-                </label>
-              </RadioGroup>
-              <p className="text-xs text-muted-foreground">Non activé par défaut. Si activé, chaque image terminée crée un draft Etsy automatiquement.</p>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Button type="button" onClick={startQueued} disabled={!jobs.some(j => j.status === 'queued') || runningCount >= CONCURRENCY}>
-                  <Play className="size-4 mr-2" /> Lancer le traitement
-                </Button>
-                <div className="text-xs text-muted-foreground">Concurrence: {runningCount}/{CONCURRENCY}</div>
-              </div>
-              <Button type="button" variant="ghost" onClick={resetAll}>
-                Réinitialiser
-              </Button>
-            </div>
           </CardContent>
         </Card>
       </div>
