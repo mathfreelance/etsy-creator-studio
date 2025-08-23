@@ -498,14 +498,14 @@ export default function BatchPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="rounded-2xl">
+        <Card className="rounded-2xl h-full flex flex-col">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <ImageIcon className="size-4" /> Images
             </CardTitle>
             <CardDescription>Dépose une ou plusieurs images (JPG, PNG, WEBP, max 15 Mo chacune). Tu peux en retirer.</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex-1 flex flex-col">
             <MultiImageDropzone onFiles={addFiles} jobs={jobs} onRemove={removeJob} />
           </CardContent>
         </Card>
@@ -648,13 +648,13 @@ function MultiImageDropzone({ onFiles, jobs, onRemove }: { onFiles: (files: File
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 h-full min-h-0">
       <div
         onDrop={onDrop}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         className={[
-          "border-2 border-dashed rounded-xl p-8 text-center transition-colors",
+          "border-2 border-dashed rounded-xl p-8 text-center transition-colors flex-1 flex items-center justify-center",
           "bg-muted/10 hover:bg-muted/20",
           isDragging ? "border-primary bg-muted/20" : "border-border",
         ].join(" ")}
