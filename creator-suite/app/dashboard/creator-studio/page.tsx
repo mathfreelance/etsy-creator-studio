@@ -651,25 +651,37 @@ function MultiImageDropzone({ onFiles, jobs, onRemove }: { onFiles: (files: File
         <div className="space-y-2">
           <div className="text-sm text-muted-foreground">Sélection ({jobs.length})</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {jobs.map((j) => (
-              <div key={j.id} className="rounded-lg border p-3 flex items-center gap-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={j.previewUrl} alt={j.file.name} className="size-16 rounded object-cover border" />
-                <div className="flex-1 min-w-0">
-                  <div className="truncate text-sm font-medium" title={j.file.name}>{j.file.name}</div>
-                  <div className="text-xs text-muted-foreground capitalize">{j.status}</div>
+            {jobs.map((j) => {
+              const total = j.stepOrder.length || 1
+              const doneCount = j.stepOrder.filter((s) => j.stepStatus[s] === 'done').length
+              const percent = Math.round((doneCount / Math.max(1, total)) * 100)
+              return (
+                <div key={j.id} className="rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={j.previewUrl} alt={j.file.name} className="size-16 rounded object-cover border" />
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate text-sm font-medium" title={j.file.name}>{j.file.name}</div>
+                      <div className="text-xs text-muted-foreground capitalize">{j.status}</div>
+                    </div>
+                    {j.status === 'running' ? (
+                      <Button type="button" variant="outline" size="icon" className="shrink-0" disabled>
+                        <Loader2 className="size-4 animate-spin" />
+                      </Button>
+                    ) : (
+                      <Button type="button" variant="destructive" size="icon" className="shrink-0" onClick={() => onRemove(j.id)}>
+                        <Trash2 className="size-4" />
+                      </Button>
+                    )}
+                  </div>
+                  {j.status === 'running' && (
+                    <div className="mt-2 w-full h-2 bg-muted rounded-full overflow-hidden" aria-label="Progression du traitement">
+                      <div className="h-full bg-primary transition-all" style={{ width: `${percent}%` }} />
+                    </div>
+                  )}
                 </div>
-                {j.status === 'running' ? (
-                  <Button type="button" variant="outline" size="icon" className="shrink-0" disabled>
-                    <Loader2 className="size-4 animate-spin" />
-                  </Button>
-                ) : (
-                  <Button type="button" variant="destructive" size="icon" className="shrink-0" onClick={() => onRemove(j.id)}>
-                    <Trash2 className="size-4" />
-                  </Button>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
