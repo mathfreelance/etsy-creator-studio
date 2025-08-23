@@ -685,17 +685,25 @@ function MultiImageDropzone({ onFiles, jobs, onRemove }: { onFiles: (files: File
               const total = j.stepOrder.length || 1
               const doneCount = j.stepOrder.filter((s) => j.stepStatus[s] === 'done').length
               const percent = Math.round((doneCount / Math.max(1, total)) * 100)
+              const displayStatus =
+                j.publish.status === 'pending'
+                  ? 'publishing'
+                  : j.publish.status === 'done'
+                    ? 'published'
+                    : j.publish.status === 'error'
+                      ? 'publish error'
+                      : j.status
               return (
                 <div key={j.id} className="rounded-lg border p-3 relative">
                   {/* Overlay action top-right */}
-                  {j.status === 'running' ? (
+                  {(j.status === 'running' || j.publish.status === 'pending') ? (
                     <Button
                       type="button"
                       variant="outline"
                       size="icon"
                       className="absolute top-2 right-2 h-8 w-8"
                       disabled
-                      aria-label="En cours"
+                      aria-label={j.publish.status === 'pending' ? 'Publication en cours' : 'En cours'}
                     >
                       <Loader2 className="size-4 animate-spin" />
                     </Button>
@@ -716,7 +724,18 @@ function MultiImageDropzone({ onFiles, jobs, onRemove }: { onFiles: (files: File
                     <img src={j.previewUrl} alt={j.file.name} className="size-16 rounded object-cover border" />
                     <div className="min-w-0 overflow-hidden pr-10">
                       <div className="truncate text-sm font-medium" title={j.file.name}>{j.file.name}</div>
-                      <div className="text-xs text-muted-foreground capitalize truncate">{j.status}</div>
+                      <div
+                        className={[
+                          "text-xs capitalize truncate",
+                          j.publish.status === 'pending'
+                            ? 'text-blue-600 dark:text-blue-400'
+                            : j.publish.status === 'done'
+                              ? 'text-green-600 dark:text-green-400'
+                              : 'text-muted-foreground',
+                        ].join(' ')}
+                      >
+                        {displayStatus}
+                      </div>
                     </div>
                   </div>
                   {j.status === 'running' && (
@@ -767,7 +786,17 @@ function JobCard({ job, onOpen, onCancel, onRemove, onDownloadZip, onPublish, se
           </span>
           <Badge variant="secondary" className="capitalize">{job.status}</Badge>
           {job.publish.status !== 'idle' && (
-            <Badge variant={job.publish.status === 'done' ? 'default' : job.publish.status === 'error' ? 'destructive' : 'secondary'}>
+            <Badge
+              variant="secondary"
+              className={[
+                'capitalize border-0',
+                job.publish.status === 'pending'
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                  : job.publish.status === 'done'
+                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                    : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+              ].join(' ')}
+            >
               {job.publish.status === 'pending' ? 'Publ.' : job.publish.status === 'done' ? `Draft${job.publish.listingId ? ` #${job.publish.listingId}` : ''}` : 'Erreur publ.'}
             </Badge>
           )}
