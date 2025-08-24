@@ -1,0 +1,12 @@
+{
+  "name": "etsy-creator-monorepo",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n FRONT,BACK -c cyan.bold,magenta.bold \"npm:dev:frontend\" \"npm:dev:backend\"",
+    "dev:frontend": "npm --prefix creator-suite run dev",
+    "dev:backend": "python.exe -m uvicorn app.main:app --app-dir server --reload --host 127.0.0.1 --port 8000"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
