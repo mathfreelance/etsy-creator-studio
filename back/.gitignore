@@ -1,5 +1,0 @@
-.env
-.env.*
-.venv/
-mockups/output/
-etsy_metadata.json
