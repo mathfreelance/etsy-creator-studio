@@ -8,15 +8,24 @@ import requests
 
 def ensure_dpi_bytes(image_bytes: bytes, dpi: int = 300, format_hint: Optional[str] = None) -> bytes:
     """Force DPI metadata by re-encoding in-memory.
-    Defaults to PNG output to preserve quality and avoid JPEG loss unless
-    format_hint is provided ("PNG"/"JPEG"/...).
+    Defaults to JPEG output (smaller transfer) unless format_hint is provided
+    ("PNG"/"JPEG"/...). For JPEG, alpha is flattened onto white to avoid
+    black artifacts.
     """
     im = Image.open(BytesIO(image_bytes))
     out = BytesIO()
-    fmt = (format_hint or im.format or "PNG").upper()
+    fmt = (format_hint or im.format or "JPEG").upper()
     save_kwargs = {"dpi": (dpi, dpi)}
     if fmt in {"JPG", "JPEG"}:
-        im = im.convert("RGB")
+        # Flatten alpha onto white background to avoid black where transparency exists
+        if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+            base = Image.new("RGB", im.size, (255, 255, 255))
+            if im.mode != "RGBA":
+                im = im.convert("RGBA")
+            base.paste(im, mask=im.split()[-1])
+            im = base
+        else:
+            im = im.convert("RGB")
         save_kwargs.update({"quality": 95, "subsampling": 0, "optimize": True, "progressive": True})
         fmt = "JPEG"
     im.save(out, fmt, **save_kwargs)
@@ -146,7 +155,7 @@ def enhance_image_bytes(image_bytes: bytes, scale: int = 2, dpi: int = 300) -> b
                     time.sleep(2.0 * (attempt + 1))
             # Ensure requested DPI explicitly
             if dpi:
-                data = ensure_dpi_bytes(data, dpi)
+                data = ensure_dpi_bytes(data, dpi, "JPEG")
             return data
         elif status in {"waiting", "processing", "queued"}:
             time.sleep(poll_interval)

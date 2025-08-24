@@ -133,8 +133,6 @@ def generate_texts(image_bytes: bytes, context: str | None = None) -> Dict[str, 
                 })
         user_content.append({"type": "image_url", "image_url": {"url": data_url, "detail": DETAIL}})
 
-        print("user_content:", user_content)
-
         resp = client.chat.completions.create(
             model=MODEL,
             messages=[

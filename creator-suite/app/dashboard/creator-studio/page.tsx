@@ -62,42 +62,7 @@ function computeSteps(opts: Options): StepKey[] {
   return arr
 }
 
-// Simple JPEG conversion for Etsy digital file friendliness
-async function toJpeg(blob: Blob, quality = 1): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    const url = URL.createObjectURL(blob)
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas')
-        canvas.width = img.naturalWidth
-        canvas.height = img.naturalHeight
-        const ctx = canvas.getContext('2d')
-        if (!ctx) {
-          reject(new Error('Canvas non supporté'))
-          return
-        }
-        ctx.fillStyle = '#ffffff'
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
-        ctx.drawImage(img, 0, 0)
-        canvas.toBlob((b) => {
-          if (!b) {
-            reject(new Error('Conversion JPEG échouée'))
-            return
-          }
-          resolve(b)
-        }, 'image/jpeg', quality)
-      } finally {
-        URL.revokeObjectURL(url)
-      }
-    }
-    img.onerror = () => {
-      URL.revokeObjectURL(url)
-      reject(new Error('Chargement image échoué'))
-    }
-    img.src = url
-  })
-}
+// No client-side conversion needed — backend outputs JPEG directly
 
 async function etsyConnected(): Promise<boolean> {
   try {
@@ -126,13 +91,12 @@ async function publishDraftFromParsed(
     }
   }
   const srcBlob = await fetch(data.processedImageUrl).then((r) => r.blob())
-  const jpegBlob = await toJpeg(srcBlob, 1)
-  if (jpegBlob.size > 20 * 1024 * 1024) {
-    throw new Error("Le fichier digital dépasse 20 Mo après conversion JPEG")
+  if (srcBlob.size > 20 * 1024 * 1024) {
+    throw new Error("Le fichier digital dépasse 20 Mo")
   }
   const fd = new FormData()
-  fd.append("processed", new File([jpegBlob], "digital.jpg", { type: "image/jpeg" }))
-  fd.append("image", new File([jpegBlob], "image.jpg", { type: "image/jpeg" }))
+  fd.append("processed", new File([srcBlob], "digital.jpg", { type: "image/jpeg" }))
+  fd.append("image", new File([srcBlob], "image.jpg", { type: "image/jpeg" }))
 
   const texts = data.texts
   if (texts?.title) fd.append("title", texts.title)
@@ -151,8 +115,8 @@ async function publishDraftFromParsed(
       try {
         const mb = await fetch(m.url).then((r) => r.blob())
         if (mb && mb.size > 0) {
-          const name = m.name || `mockup-${i + 1}.png`
-          fd.append("mockups", new File([mb], name, { type: mb.type || "image/png" as any }))
+          const name = m.name || `mockup-${i + 1}.jpg`
+          fd.append("mockups", new File([mb], name, { type: (mb.type as any) || "image/jpeg" as any }))
         }
       } catch {}
     }

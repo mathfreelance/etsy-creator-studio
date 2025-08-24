@@ -24,7 +24,7 @@ export interface ResultsPanelProps {
 }
 
 export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) {
-  const [processedJpegSize, setProcessedJpegSize] = React.useState<number | null>(null)
+  
 
   const copy = (text: string) => {
     if (!navigator.clipboard) return
@@ -47,74 +47,12 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
     }
   }
 
-  // Convert any image Blob to JPEG via canvas (fills white background for alpha)
-  async function toJpeg(blob: Blob, quality = 1): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-      const img = new Image()
-      const url = URL.createObjectURL(blob)
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas')
-          canvas.width = img.naturalWidth
-          canvas.height = img.naturalHeight
-          const ctx = canvas.getContext('2d')
-          if (!ctx) {
-            reject(new Error('Canvas non supporté'))
-            return
-          }
-          // Fill background white to avoid black where alpha exists
-          ctx.fillStyle = '#ffffff'
-          ctx.fillRect(0, 0, canvas.width, canvas.height)
-          ctx.drawImage(img, 0, 0)
-          canvas.toBlob((b) => {
-            if (!b) {
-              reject(new Error('Conversion JPEG échouée'))
-              return
-            }
-            resolve(b)
-          }, 'image/jpeg', quality)
-        } finally {
-          URL.revokeObjectURL(url)
-        }
-      }
-      img.onerror = () => {
-        URL.revokeObjectURL(url)
-        reject(new Error('Chargement image échoué'))
-      }
-      img.src = url
-    })
-  }
-
-  // Compute JPEG size (quality 100%) for display purposes
-  React.useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      if (!data.processedImageUrl) {
-        setProcessedJpegSize(null)
-        return
-      }
-      try {
-        const src = await fetch(data.processedImageUrl).then((r) => r.blob())
-        const jpeg = await toJpeg(src, 1)
-        if (!cancelled) setProcessedJpegSize(jpeg.size)
-      } catch {
-        if (!cancelled) setProcessedJpegSize(null)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [data.processedImageUrl])
+  
 
   async function downloadProcessedAsJpeg() {
     if (!data.processedImageUrl) return
     try {
-      const src = await fetch(data.processedImageUrl).then((r) => r.blob())
-      const jpeg = await toJpeg(src, 1)
-      const url = URL.createObjectURL(jpeg)
-      downloadUrl(url, 'digital.jpg')
-      // Cleanup shortly after triggering download
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      downloadUrl(data.processedImageUrl, 'digital.jpg')
     } catch {
       toast.error('Téléchargement impossible')
     }
@@ -153,9 +91,9 @@ export function ResultsPanel({ data, onDownload, filename }: ResultsPanelProps) 
                 </Button>
               </div>
             </div>
-            {(typeof processedJpegSize === 'number' || typeof data.processedImageSize === 'number') && (
+            {typeof data.processedImageSize === 'number' && (
               <div className="text-xs text-muted-foreground">
-                Taille: {formatBytes((processedJpegSize ?? data.processedImageSize!) as number)}
+                Taille: {formatBytes(data.processedImageSize as number)}
               </div>
             )}
           </section>

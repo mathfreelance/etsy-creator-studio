@@ -29,8 +29,10 @@ export async function parseProcessZip(zipBlob: Blob): Promise<ParsedPackage> {
     },
   }
 
-  // Processed image (expected: image/processed.png)
-  const processed = zip.file("image/processed.png")
+  // Processed image (prefer JPEG: image/processed.jpg; fallback to PNG for older packages)
+  const processedJpg = zip.file("image/processed.jpg")
+  const processedPng = processedJpg ? null : zip.file("image/processed.png")
+  const processed = processedJpg || processedPng
   if (processed) {
     const b = await processed.async("blob")
     const url = URL.createObjectURL(b)

@@ -196,25 +196,16 @@ async def process(
             logger.info(f"[process] enhance x{upscale} done in {time.perf_counter()-t0:.2f}s")
             await _push_progress(rid, {"event": "step", "step": "image", "status": "done", "mode": "enhance", "scale": upscale})
         else:
-            processed = await asyncio.to_thread(ensure_dpi_bytes, raw, dpi)
+            processed = await asyncio.to_thread(ensure_dpi_bytes, raw, dpi, "JPEG")
             manifest["generated"].append({"type": "dpi_image"})
             logger.info(f"[process] ensure_dpi({dpi}) done in {time.perf_counter()-t0:.2f}s")
             await _push_progress(rid, {"event": "step", "step": "image", "status": "done", "mode": "dpi", "dpi": dpi})
 
-        # Normalize to PNG with requested DPI for consistency in the ZIP
+        # Store processed as JPEG with requested DPI for consistency in the ZIP
         t1 = time.perf_counter()
-        try:
-            def to_png_bytes(data: bytes, dpi_val: int) -> bytes:
-                im = Image.open(BytesIO(data))
-                out_png_io = BytesIO()
-                im.save(out_png_io, "PNG", dpi=(dpi_val, dpi_val))
-                return out_png_io.getvalue()
-
-            processed_png = await asyncio.to_thread(to_png_bytes, processed, dpi)
-        except Exception:
-            processed_png = processed
-        files.append(("image/processed.png", processed_png))
-        logger.info(f"[process] normalize->PNG done in {time.perf_counter()-t1:.2f}s")
+        processed_jpeg = processed  # already JPEG from branches above
+        files.append(("image/processed.jpg", processed_jpeg))
+        logger.info(f"[process] normalize->JPEG done in {time.perf_counter()-t1:.2f}s")
     except Exception as e:
         logger.exception("[process] Enhance/DPI failed")
         raise HTTPException(status_code=500, detail=f"Enhance/DPI failed: {e}")
@@ -231,7 +222,7 @@ async def process(
         logger.info("[process] starting mockups generation…")
         # Mark mockups step as started when we kick off generation
         await _push_progress(rid, {"event": "step", "step": "mockups", "status": "started"})
-        mockups_task = asyncio.create_task(asyncio.to_thread(build_mockups, processed_png))
+        mockups_task = asyncio.create_task(asyncio.to_thread(build_mockups, processed_jpeg))
 
     # text generation already launched at start if enabled
 
@@ -259,7 +250,7 @@ async def process(
         try:
             # Mark video step as started before building preview
             await _push_progress(rid, {"event": "step", "step": "video", "status": "started"})
-            frames = mockup_bytes if mockup_bytes else [processed_png, processed_png, processed_png]
+            frames = mockup_bytes if mockup_bytes else [processed_jpeg, processed_jpeg, processed_jpeg]
             mp4 = await asyncio.to_thread(build_preview_video, frames)
             files.append(("video/preview.mp4", mp4))
             manifest["generated"].append({"type": "video"})

@@ -184,13 +184,13 @@ async def create_draft_listing(request: Request):
                 processed_bytes = None
 
         image_bytes: bytes = b""
-        img_ct: str = "image/png"
+        img_ct: str = "image/jpeg"
         if image is not None:
             try:
                 image_bytes = await image.read()
             except TypeError:
                 image_bytes = image.file.read() if hasattr(image, "file") else b""
-            img_ct = getattr(image, "content_type", None) or "image/png"
+            img_ct = getattr(image, "content_type", None) or "image/jpeg"
 
         # Determine digital payload and validate size
         digital_bytes = processed_bytes or image_bytes
@@ -260,10 +260,10 @@ async def create_draft_listing(request: Request):
                     etsy.upload_listing_image(
                         listing_id,
                         mb,
-                        filename=getattr(mf, "filename", f"mockup-{i+1}.png"),
+                        filename=getattr(mf, "filename", f"mockup-{i+1}.jpg"),
                         shop_id=shop_id,
                         rank=rank,
-                        content_type=getattr(mf, "content_type", None) or "image/png",
+                        content_type=getattr(mf, "content_type", None) or "image/jpeg",
                         alt_text=(alt_seo or title or "")[:500],
                     )
                     rank += 1
@@ -275,8 +275,8 @@ async def create_draft_listing(request: Request):
         # Ensure type is digital
         etsy.ensure_download_type(listing_id, shop_id=shop_id)
 
-        # Upload the digital file using computed payload
-        digital_name = "processed.png" if processed_bytes else "image.png"
+        # Upload the digital file using computed payload (JPEG)
+        digital_name = "processed.jpg" if processed_bytes else "image.jpg"
         etsy.upload_listing_file(listing_id, digital_bytes, filename=digital_name, shop_id=shop_id)
 
         # Upload video if provided

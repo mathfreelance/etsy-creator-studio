@@ -252,14 +252,14 @@ def create_draft_listing(*, title: str, description: str, tags: str, price: str,
     return resp.json()
 
 
-def upload_listing_image(listing_id: int, image_bytes: bytes, filename: str, shop_id: Optional[str] = None, rank: int = 1, content_type: str = "image/png", alt_text: Optional[str] = None) -> Dict[str, object]:
+def upload_listing_image(listing_id: int, image_bytes: bytes, filename: str, shop_id: Optional[str] = None, rank: int = 1, content_type: str = "image/jpeg", alt_text: Optional[str] = None) -> Dict[str, object]:
     headers = get_auth_headers().copy()
     sid = shop_id or ""
     if not sid:
         raise RuntimeError("Missing shop_id for upload_listing_image")
     url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}/images"
     files = {
-        "image": (filename, image_bytes, content_type or "image/png"),
+        "image": (filename, image_bytes, content_type or "image/jpeg"),
     }
     data = {"rank": str(rank)}
     if alt_text:
@@ -278,7 +278,7 @@ def upload_listing_file(listing_id: int, file_bytes: bytes, filename: str, shop_
         raise RuntimeError("Missing shop_id for upload_listing_file")
     url = f"{ETSY_API_BASE}/shops/{sid}/listings/{listing_id}/files"
     files = {
-        "file": (filename, file_bytes, "image/png"),
+        "file": (filename, file_bytes, "image/jpeg"),
     }
     # Etsy requires a user-facing name for the digital file
     data = {"name": filename}
