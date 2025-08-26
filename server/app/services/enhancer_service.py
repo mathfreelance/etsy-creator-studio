@@ -81,7 +81,8 @@ def enhance_image_bytes(image_bytes: bytes, scale: int = 2, dpi: int = 300) -> b
     data = {"scaleRadio": str(scale)}
     for attempt in range(2):
         try:
-            r = sess.post(UPLOAD_URL, files=files, data=data, timeout=60)
+            # Increased timeout for upload
+            r = sess.post(UPLOAD_URL, files=files, data=data, timeout=120)
             r.raise_for_status()
             break
         except requests.exceptions.Timeout:
@@ -95,7 +96,8 @@ def enhance_image_bytes(image_bytes: bytes, scale: int = 2, dpi: int = 300) -> b
 
     # 2) Poll
     start = time.time()
-    timeout = 300.0
+    # Extend overall poll timeout to reduce spurious timeouts
+    timeout = 600.0
     poll_interval = 5.0
     status = None
     last_payload = None
@@ -108,14 +110,14 @@ def enhance_image_bytes(image_bytes: bytes, scale: int = 2, dpi: int = 300) -> b
                     STATUS_URL,
                     json=payload,
                     headers={"Content-Type": "application/json; charset=UTF-8"},
-                    timeout=30,
+                    timeout=45,
                 )
                 if rr.status_code == 415:
                     rr = sess.post(
                         STATUS_URL,
                         data=payload,
                         headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
-                        timeout=30,
+                        timeout=45,
                     )
                 rr.raise_for_status()
                 return rr.json()
@@ -136,22 +138,28 @@ def enhance_image_bytes(image_bytes: bytes, scale: int = 2, dpi: int = 300) -> b
             if not urls:
                 raise RuntimeError(f"No download URL in: {pj}")
             download_url = urls[0]
-            # Download with one retry on timeout
+            # Download with retry handling for timeouts and chunked encoding errors
             last_exc = None
+            data = None
             for attempt in range(2):
                 try:
-                    dr = sess.get(download_url, stream=True, timeout=120)
-                    dr.raise_for_status()
-                    chunks = []
-                    for chunk in dr.iter_content(chunk_size=1 << 16):
-                        if chunk:
-                            chunks.append(chunk)
-                    data = b"".join(chunks)
+                    # First try streaming
+                    with sess.get(download_url, stream=True, timeout=240) as dr:
+                        dr.raise_for_status()
+                        chunks = []
+                        for chunk in dr.iter_content(chunk_size=1 << 16):
+                            if chunk:
+                                chunks.append(chunk)
+                        data = b"".join(chunks)
                     break
-                except requests.exceptions.Timeout as e:
+                except (requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError, requests.exceptions.ConnectionError) as e:
                     last_exc = e
                     if attempt >= 1:
-                        raise
+                        # Final attempt: try non-streaming direct download
+                        rr = sess.get(download_url, timeout=240)
+                        rr.raise_for_status()
+                        data = rr.content
+                        break
                     time.sleep(2.0 * (attempt + 1))
             # Ensure requested DPI explicitly
             if dpi:
