@@ -50,6 +50,32 @@ def get_shop_listings(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/shop/sales")
+def get_shop_sales(shop_id: Optional[str] = None, limit: int = 100, max_pages: int = 10):
+    """Return aggregated sales (transactions) for the shop, grouped by listing.
+
+    limit: page size for upstream pagination (1..100)
+    max_pages: max number of pages to fetch
+    """
+    try:
+        data = etsy.get_shop_sales(shop_id=shop_id, page_limit=int(limit), max_pages=int(max_pages))
+        return data
+    except PermissionError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Return graceful error instead of 500 if service used soft-fail
+        return JSONResponse(status_code=200, content={
+            "ok": False,
+            "detail": str(e),
+            "total_sales": 0,
+            "revenue": 0.0,
+            "currency_code": "",
+            "by_listing": {},
+        })
+
+
 @router.get("/auth/callback")
 def etsy_auth_callback(request: Request):
     """Handle OAuth callback from Etsy. Exchanges code for tokens and closes the window."""

@@ -9,7 +9,7 @@ import requests
 def ensure_dpi_bytes(image_bytes: bytes, dpi: int = 300, format_hint: Optional[str] = None) -> bytes:
     """Force DPI metadata by re-encoding in-memory.
     Defaults to JPEG output (smaller transfer) unless format_hint is provided
-    ("PNG"/"JPEG"/...). For JPEG, alpha is flattened onto white to avoid
+    ("PNG"/"JPEG"/...). For JPEG, alpha is flattened onto black to avoid
     black artifacts.
     """
     im = Image.open(BytesIO(image_bytes))
@@ -17,9 +17,9 @@ def ensure_dpi_bytes(image_bytes: bytes, dpi: int = 300, format_hint: Optional[s
     fmt = (format_hint or im.format or "JPEG").upper()
     save_kwargs = {"dpi": (dpi, dpi)}
     if fmt in {"JPG", "JPEG"}:
-        # Flatten alpha onto white background to avoid black where transparency exists
+        # Flatten alpha onto black background to avoid black where transparency exists
         if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
-            base = Image.new("RGB", im.size, (255, 255, 255))
+            base = Image.new("RGB", im.size, (0, 0, 0))
             if im.mode != "RGBA":
                 im = im.convert("RGBA")
             base.paste(im, mask=im.split()[-1])

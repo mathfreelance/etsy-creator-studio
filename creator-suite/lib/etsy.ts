@@ -48,3 +48,28 @@ export function extractListingsArray(resp: EtsyListingsResponse | undefined | nu
   if (anyResp.data && Array.isArray(anyResp.data.results)) return anyResp.data.results
   return []
 }
+
+export type EtsySalesByListing = Record<string, { sales: number; revenue: number }>
+export type EtsySalesResponse = {
+  ok?: boolean
+  total_sales?: number
+  revenue?: number
+  currency_code?: string
+  by_listing?: EtsySalesByListing
+  detail?: string
+}
+
+export async function etsyGetShopSales(params?: { limit?: number; max_pages?: number }): Promise<EtsySalesResponse> {
+  const sp = new URLSearchParams()
+  if (typeof params?.limit === 'number') sp.set('limit', String(params.limit))
+  if (typeof params?.max_pages === 'number') sp.set('max_pages', String(params.max_pages))
+  const qs = sp.toString()
+  const url = `/api/etsy/shop/sales${qs ? `?${qs}` : ''}`
+  const r = await fetch(url, { cache: 'no-store' })
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({} as any))
+    // Return soft error structure so UI can continue gracefully
+    return { ok: false, detail: (j as any)?.detail }
+  }
+  return r.json()
+}

@@ -74,7 +74,8 @@ def build_auth_url(redirect_uri: Optional[str] = None, scopes: Optional[str] = N
     """Build the Etsy OAuth authorization URL. Returns (url, state) when PKCE is used; otherwise (url, None)."""
     client_id = _env("ETSY_CLIENT_ID", _env("ETSY_API_KEY", ""))
     redirect = redirect_uri or _env("ETSY_REDIRECT_URI")
-    scope_str = scopes or _env("ETSY_SCOPES", "listings_r listings_w shops_r")
+    # Include transactions_r by default to allow reading sales/transactions
+    scope_str = scopes or _env("ETSY_SCOPES", "listings_r listings_w shops_r transactions_r")
 
     params = {
         "response_type": "code",
@@ -482,6 +483,128 @@ def get_shop_listings(shop_id: Optional[str] = None, state: Optional[str] = "act
     if resp.status_code >= 400:
         raise RuntimeError(f"getShopListings failed: {resp.status_code} {resp.text}")
     return resp.json()
+
+
+def _extract_array(resp_json: Dict[str, object]) -> List[dict]:
+    """Best-effort normalizer for Etsy list responses."""
+    try:
+        if isinstance(resp_json, list):
+            return list(resp_json)
+        if isinstance(resp_json.get("results"), list):
+            return resp_json["results"]  # type: ignore[index]
+        if isinstance(resp_json.get("transactions"), list):
+            return resp_json["transactions"]  # type: ignore[index]
+        if isinstance(resp_json.get("data"), list):
+            return resp_json["data"]  # type: ignore[index]
+        data = resp_json.get("data")
+        if isinstance(data, dict) and isinstance(data.get("results"), list):
+            return data["results"]  # type: ignore[index]
+    except Exception:
+        pass
+    return []
+
+
+def get_shop_sales(shop_id: Optional[str] = None, page_limit: int = 100, max_pages: int = 10) -> Dict[str, object]:
+    """Aggregate sales by listing using the Transactions endpoint.
+
+    Returns a JSON object with:
+      - ok: bool
+      - total_sales: int (sum of quantities)
+      - revenue: float (sum of price*qty in shop currency when available)
+      - currency_code: str
+      - by_listing: { listing_id: { sales: int, revenue: float } }
+
+    Best-effort parsing with robust fallbacks to avoid 500s.
+    """
+    headers = get_auth_headers().copy()
+    sid = (shop_id or get_defaults().get("shop_id") or "").strip()
+    if not sid:
+        sid = ensure_shop_id()
+
+    currency_code = get_defaults().get("currency_code", "EUR")
+    by_listing: Dict[str, Dict[str, float]] = {}
+    total_sales = 0
+    revenue = 0.0
+
+    # Paginate Transactions endpoint; if unavailable, return ok=False gracefully.
+    base_url = f"{ETSY_API_BASE}/shops/{sid}/transactions"
+    try:
+        offset = 0
+        for _ in range(max_pages):
+            params = {
+                "limit": max(1, min(int(page_limit or 100), 100)),
+                "offset": max(0, int(offset or 0)),
+            }
+            resp = requests.get(base_url, headers=headers, params=params, timeout=30)
+            if resp.status_code >= 400:
+                # Break on client/server error and return best-effort aggregates so far
+                break
+            j = resp.json()
+            arr = _extract_array(j)
+            if not arr:
+                break
+
+            for tx in arr:
+                try:
+                    lid = tx.get("listing_id") or tx.get("listingId") or tx.get("listingId")
+                    if not lid:
+                        continue
+                    key = str(lid)
+                    qty = int(tx.get("quantity") or 1)
+                    # Parse price: support nested money objects or plain strings/numbers
+                    price_val = 0.0
+                    price_obj = tx.get("price")
+                    if isinstance(price_obj, dict):
+                        amt = price_obj.get("amount")
+                        if isinstance(amt, (int, float)):
+                            # Etsy money amounts are in minor units
+                            price_val = float(amt) / 100.0
+                        else:
+                            # sometimes price can be a string in the dict
+                            try:
+                                price_val = float(str(price_obj.get("price")))
+                            except Exception:
+                                pass
+                        cc = price_obj.get("currency_code") or price_obj.get("currency")
+                        if isinstance(cc, str):
+                            currency_code = cc
+                    else:
+                        try:
+                            price_val = float(str(tx.get("price") or 0))
+                        except Exception:
+                            price_val = 0.0
+
+                    by_listing.setdefault(key, {"sales": 0.0, "revenue": 0.0})
+                    by_listing[key]["sales"] += float(qty)
+                    by_listing[key]["revenue"] += price_val * float(qty)
+                    total_sales += qty
+                    revenue += price_val * qty
+                except Exception:
+                    continue
+
+            # Stop if fewer than requested returned
+            if len(arr) < params["limit"]:
+                break
+            offset += params["limit"]
+
+        # Convert sales from float to int in final payload
+        normalized = {k: {"sales": int(v.get("sales", 0)), "revenue": float(v.get("revenue", 0.0))} for k, v in by_listing.items()}
+        return {
+            "ok": True,
+            "total_sales": int(total_sales),
+            "revenue": float(revenue),
+            "currency_code": currency_code,
+            "by_listing": normalized,
+        }
+    except Exception:
+        # Graceful fallback, avoid 500 to the client
+        return {
+            "ok": False,
+            "total_sales": 0,
+            "revenue": 0.0,
+            "currency_code": currency_code,
+            "by_listing": {},
+        }
 
 
 def get_my_shops() -> Dict[str, object]:

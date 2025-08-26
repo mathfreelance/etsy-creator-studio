@@ -2,13 +2,14 @@
 
 import React from "react"
 import { toast } from "sonner"
-import { etsyAuthStatus, etsyGetShop, etsyGetShopListings, extractListingsArray } from "@/lib/etsy"
+import { etsyAuthStatus, etsyGetShop, etsyGetShopListings, extractListingsArray, etsyGetShopSales, EtsySalesResponse } from "@/lib/etsy"
 
 export type DashboardDataCtx = {
   checking: boolean
   connected: boolean
   shop: any | null
   listings: any[]
+  sales: EtsySalesResponse | null
   loading: boolean
   missingShopId: boolean
   hasLoaded: boolean
@@ -23,6 +24,7 @@ export function DashboardDataProvider({ children }: { children: React.ReactNode 
   const [connected, setConnected] = React.useState(false)
   const [shop, setShop] = React.useState<any | null>(null)
   const [listings, setListings] = React.useState<any[]>([])
+  const [sales, setSales] = React.useState<EtsySalesResponse | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [missingShopId, setMissingShopId] = React.useState(false)
   const [hasLoaded, setHasLoaded] = React.useState(false)
@@ -32,12 +34,52 @@ export function DashboardDataProvider({ children }: { children: React.ReactNode 
     setLoading(true)
     setMissingShopId(false)
     try {
-      const [s, l] = await Promise.all([
+      // Fetch shop and all active listings (paginate until complete)
+      const [s] = await Promise.all([
         etsyGetShop(),
-        etsyGetShopListings({ state: "active", limit: 24, offset: 0 }),
       ])
       setShop(s)
-      setListings(extractListingsArray(l))
+
+      const all: any[] = []
+      const limit = 100
+      let offset = 0
+      let total: number | undefined = undefined
+      // Loop with sane upper bound in case API doesn't return count reliably
+      for (let page = 0; page < 100; page++) {
+        const resp = await etsyGetShopListings({ state: "active", limit, offset })
+        const arr = extractListingsArray(resp)
+        if (typeof (resp as any)?.count === "number") total = (resp as any).count
+        if (typeof (resp as any)?.total === "number") total = (resp as any).total
+        if (Array.isArray(arr) && arr.length) {
+          all.push(...arr)
+        }
+        // Stop if fewer than requested returned, or we've met the known total
+        if (!arr || arr.length < limit) break
+        if (typeof total === "number" && all.length >= total) break
+        offset += limit
+      }
+
+      // Fetch sales and merge per-listing stats
+      let salesResp: EtsySalesResponse | null = null
+      try {
+        salesResp = await etsyGetShopSales({ limit: 100, max_pages: 10 })
+      } catch {
+        salesResp = null
+      }
+      setSales(salesResp)
+
+      if (salesResp && salesResp.by_listing) {
+        const by = salesResp.by_listing
+        const merged = all.map((it: any) => {
+          const id = it.listing_id || it.id || it.listingId
+          const k = id != null ? String(id) : undefined
+          const agg = (k && by[k]) ? by[k] : undefined
+          return { ...it, sales_count: agg?.sales || 0, sales_revenue: agg?.revenue || 0 }
+        })
+        setListings(merged)
+      } else {
+        setListings(all)
+      }
     } catch (e: any) {
       const msg = typeof e?.message === "string" ? e.message : ""
       if (msg.toLowerCase().includes("missing shop_id")) {
@@ -99,8 +141,8 @@ export function DashboardDataProvider({ children }: { children: React.ReactNode 
   }, [])
 
   const value: DashboardDataCtx = React.useMemo(
-    () => ({ checking, connected, shop, listings, loading, missingShopId, hasLoaded, init, refresh }),
-    [checking, connected, shop, listings, loading, missingShopId, hasLoaded]
+    () => ({ checking, connected, shop, listings, sales, loading, missingShopId, hasLoaded, init, refresh }),
+    [checking, connected, shop, listings, sales, loading, missingShopId, hasLoaded]
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
