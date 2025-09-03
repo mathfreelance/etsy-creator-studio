@@ -76,6 +76,30 @@ def get_shop_sales(shop_id: Optional[str] = None, limit: int = 100, max_pages: i
         })
 
 
+@router.get("/shop/receipts")
+def get_shop_receipts(shop_id: Optional[str] = None, limit: int = 100, max_pages: int = 10):
+    """Return detailed receipts with nested transactions for the shop.
+
+    limit: page size for upstream pagination (1..100)
+    max_pages: max number of pages to fetch
+    """
+    try:
+        data = etsy.get_shop_receipts(shop_id=shop_id, page_limit=int(limit), max_pages=int(max_pages))
+        return data
+    except PermissionError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Return graceful error instead of 500 if service used soft-fail
+        return JSONResponse(status_code=200, content={
+            "ok": False,
+            "detail": str(e),
+            "currency_code": "",
+            "count": 0,
+            "receipts": [],
+        })
+
 @router.get("/auth/callback")
 def etsy_auth_callback(request: Request):
     """Handle OAuth callback from Etsy. Exchanges code for tokens and closes the window."""
@@ -155,9 +179,23 @@ async def set_prefs(request: Request):
     """Update and persist Etsy preferences. Accepts JSON body with shop_id and/or taxonomy_id."""
     try:
         data = await request.json()
-        shop_id = (data or {}).get("shop_id")
-        taxonomy_id = (data or {}).get("taxonomy_id")
-        saved = etsy.set_prefs(shop_id=shop_id, taxonomy_id=taxonomy_id)
+        body = (data or {})
+        shop_id = body.get("shop_id")
+        taxonomy_id = body.get("taxonomy_id")
+        # Optional billing fields
+        saved = etsy.set_prefs(
+            shop_id=shop_id,
+            taxonomy_id=taxonomy_id,
+            billing_name=body.get("billing_name"),
+            billing_address1=body.get("billing_address1"),
+            billing_address2=body.get("billing_address2"),
+            billing_city=body.get("billing_city"),
+            billing_state=body.get("billing_state"),
+            billing_zip=body.get("billing_zip"),
+            billing_country=body.get("billing_country"),
+            billing_tax_id=body.get("billing_tax_id"),
+            billing_email=body.get("billing_email"),
+        )
         return saved
     except HTTPException:
         raise

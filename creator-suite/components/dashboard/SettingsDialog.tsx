@@ -16,6 +16,16 @@ export function SettingsDialog() {
   const [savingPrefs, setSavingPrefs] = React.useState<boolean>(false)
   const [shopId, setShopId] = React.useState<string>("")
   const [taxonomyId, setTaxonomyId] = React.useState<string>("")
+  // Billing fields
+  const [billingName, setBillingName] = React.useState<string>("")
+  const [billingAddress1, setBillingAddress1] = React.useState<string>("")
+  const [billingAddress2, setBillingAddress2] = React.useState<string>("")
+  const [billingCity, setBillingCity] = React.useState<string>("")
+  const [billingState, setBillingState] = React.useState<string>("")
+  const [billingZip, setBillingZip] = React.useState<string>("")
+  const [billingCountry, setBillingCountry] = React.useState<string>("")
+  const [billingTaxId, setBillingTaxId] = React.useState<string>("")
+  const [billingEmail, setBillingEmail] = React.useState<string>("")
 
   React.useEffect(() => {
     checkStatus()
@@ -62,6 +72,15 @@ export function SettingsDialog() {
         const j = await r.json()
         if (typeof j?.shop_id === "string") setShopId(j.shop_id)
         if (typeof j?.taxonomy_id === "string") setTaxonomyId(j.taxonomy_id)
+        if (typeof j?.billing_name === "string") setBillingName(j.billing_name)
+        if (typeof j?.billing_address1 === "string") setBillingAddress1(j.billing_address1)
+        if (typeof j?.billing_address2 === "string") setBillingAddress2(j.billing_address2)
+        if (typeof j?.billing_city === "string") setBillingCity(j.billing_city)
+        if (typeof j?.billing_state === "string") setBillingState(j.billing_state)
+        if (typeof j?.billing_zip === "string") setBillingZip(j.billing_zip)
+        if (typeof j?.billing_country === "string") setBillingCountry(j.billing_country)
+        if (typeof j?.billing_tax_id === "string") setBillingTaxId(j.billing_tax_id)
+        if (typeof j?.billing_email === "string") setBillingEmail(j.billing_email)
       }
     } catch {
       // ignore
@@ -76,7 +95,18 @@ export function SettingsDialog() {
       const r = await fetch("/api/etsy/prefs", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ taxonomy_id: taxonomyId }),
+        body: JSON.stringify({
+          taxonomy_id: taxonomyId,
+          billing_name: billingName,
+          billing_address1: billingAddress1,
+          billing_address2: billingAddress2,
+          billing_city: billingCity,
+          billing_state: billingState,
+          billing_zip: billingZip,
+          billing_country: billingCountry,
+          billing_tax_id: billingTaxId,
+          billing_email: billingEmail,
+        }),
       })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
@@ -184,6 +214,47 @@ export function SettingsDialog() {
               <div className="space-y-1">
                 <Label htmlFor="taxo">Taxonomy ID</Label>
                 <Input id="taxo" value={taxonomyId} onChange={(e) => setTaxonomyId(e.target.value)} />
+              </div>
+            </div>
+            <div className="pt-2">
+              <div className="text-sm font-medium mb-1">Coordonnées de facturation</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="billing_name">Nom/Raison sociale</Label>
+                  <Input id="billing_name" value={billingName} onChange={(e) => setBillingName(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="billing_email">Email</Label>
+                  <Input id="billing_email" type="email" value={billingEmail} onChange={(e) => setBillingEmail(e.target.value)} />
+                </div>
+                <div className="space-y-1 md:col-span-2">
+                  <Label htmlFor="billing_address1">Adresse ligne 1</Label>
+                  <Input id="billing_address1" value={billingAddress1} onChange={(e) => setBillingAddress1(e.target.value)} />
+                </div>
+                <div className="space-y-1 md:col-span-2">
+                  <Label htmlFor="billing_address2">Adresse ligne 2 (optionnel)</Label>
+                  <Input id="billing_address2" value={billingAddress2} onChange={(e) => setBillingAddress2(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="billing_city">Ville</Label>
+                  <Input id="billing_city" value={billingCity} onChange={(e) => setBillingCity(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="billing_state">État/Province</Label>
+                  <Input id="billing_state" value={billingState} onChange={(e) => setBillingState(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="billing_zip">Code postal</Label>
+                  <Input id="billing_zip" value={billingZip} onChange={(e) => setBillingZip(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="billing_country">Pays</Label>
+                  <Input id="billing_country" value={billingCountry} onChange={(e) => setBillingCountry(e.target.value)} />
+                </div>
+                <div className="space-y-1 md:col-span-2">
+                  <Label htmlFor="billing_tax_id">N° TVA / SIREN (optionnel)</Label>
+                  <Input id="billing_tax_id" value={billingTaxId} onChange={(e) => setBillingTaxId(e.target.value)} />
+                </div>
               </div>
             </div>
             <div className="flex gap-2">

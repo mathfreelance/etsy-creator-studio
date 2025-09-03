@@ -25,7 +25,7 @@ import { toast } from "sonner"
 
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"]
 const MAX_BYTES = 15 * 1024 * 1024 // 15MB
-const CONCURRENCY = 3
+const CONCURRENCY = 5
 
 type JobStatus = "queued" | "running" | "done" | "error" | "cancelled"
 
@@ -154,8 +154,8 @@ export default function BatchPage() {
     enhance: { enabled: true, scale: 4 },
   })
   const [autoPublish, setAutoPublish] = React.useState<"off" | "draft">("off")
-  const [etsyPrice, setEtsyPrice] = React.useState<string>("5.00")
-  const [etsyQuantity, setEtsyQuantity] = React.useState<string>("10")
+  const [etsyPrice, setEtsyPrice] = React.useState<string>("2.50")
+  const [etsyQuantity, setEtsyQuantity] = React.useState<string>("3")
   const [jobs, setJobs] = React.useState<Job[]>([])
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [dialogJobId, setDialogJobId] = React.useState<string | null>(null)

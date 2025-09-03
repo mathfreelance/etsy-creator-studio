@@ -53,6 +53,11 @@ const data = {
       url: "/dashboard/creator-studio",
       icon: IconReport,
     },
+    {
+      title: "Invoice Generator",
+      url: "/dashboard/invoice-generator",
+      icon: IconFileDescription,
+    },
     /*{
       title: "Lifecycle",
       url: "#",

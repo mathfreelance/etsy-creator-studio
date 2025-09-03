@@ -195,13 +195,44 @@ def get_prefs() -> Dict[str, str]:
         taxonomy_id = "2078"
         _token_store["taxonomy_id"] = taxonomy_id
         _persist_tokens(_token_store)
+    # Billing preferences (optional)
+    billing_name = str(_token_store.get("billing_name") or "")
+    billing_address1 = str(_token_store.get("billing_address1") or "")
+    billing_address2 = str(_token_store.get("billing_address2") or "")
+    billing_city = str(_token_store.get("billing_city") or "")
+    billing_state = str(_token_store.get("billing_state") or "")
+    billing_zip = str(_token_store.get("billing_zip") or "")
+    billing_country = str(_token_store.get("billing_country") or "")
+    billing_tax_id = str(_token_store.get("billing_tax_id") or "")
+    billing_email = str(_token_store.get("billing_email") or "")
     return {
         "shop_id": shop_id,
         "taxonomy_id": taxonomy_id,
+        "billing_name": billing_name,
+        "billing_address1": billing_address1,
+        "billing_address2": billing_address2,
+        "billing_city": billing_city,
+        "billing_state": billing_state,
+        "billing_zip": billing_zip,
+        "billing_country": billing_country,
+        "billing_tax_id": billing_tax_id,
+        "billing_email": billing_email,
     }
 
 
-def set_prefs(shop_id: Optional[str] = None, taxonomy_id: Optional[str] = None) -> Dict[str, str]:
+def set_prefs(
+    shop_id: Optional[str] = None,
+    taxonomy_id: Optional[str] = None,
+    billing_name: Optional[str] = None,
+    billing_address1: Optional[str] = None,
+    billing_address2: Optional[str] = None,
+    billing_city: Optional[str] = None,
+    billing_state: Optional[str] = None,
+    billing_zip: Optional[str] = None,
+    billing_country: Optional[str] = None,
+    billing_tax_id: Optional[str] = None,
+    billing_email: Optional[str] = None,
+) -> Dict[str, str]:
     """Persist preferences into the same JSON file as tokens."""
     changed = False
     if shop_id is not None and str(shop_id).strip():
@@ -209,6 +240,34 @@ def set_prefs(shop_id: Optional[str] = None, taxonomy_id: Optional[str] = None) 
         changed = True
     if taxonomy_id is not None and str(taxonomy_id).strip():
         _token_store["taxonomy_id"] = str(taxonomy_id).strip()
+        changed = True
+    # Billing fields
+    if billing_name is not None and str(billing_name).strip():
+        _token_store["billing_name"] = str(billing_name).strip()
+        changed = True
+    if billing_address1 is not None and str(billing_address1).strip():
+        _token_store["billing_address1"] = str(billing_address1).strip()
+        changed = True
+    if billing_address2 is not None and str(billing_address2).strip():
+        _token_store["billing_address2"] = str(billing_address2).strip()
+        changed = True
+    if billing_city is not None and str(billing_city).strip():
+        _token_store["billing_city"] = str(billing_city).strip()
+        changed = True
+    if billing_state is not None and str(billing_state).strip():
+        _token_store["billing_state"] = str(billing_state).strip()
+        changed = True
+    if billing_zip is not None and str(billing_zip).strip():
+        _token_store["billing_zip"] = str(billing_zip).strip()
+        changed = True
+    if billing_country is not None and str(billing_country).strip():
+        _token_store["billing_country"] = str(billing_country).strip()
+        changed = True
+    if billing_tax_id is not None and str(billing_tax_id).strip():
+        _token_store["billing_tax_id"] = str(billing_tax_id).strip()
+        changed = True
+    if billing_email is not None and str(billing_email).strip():
+        _token_store["billing_email"] = str(billing_email).strip()
         changed = True
     if changed:
         _persist_tokens(_token_store)
@@ -438,6 +497,16 @@ def get_defaults() -> Dict[str, str]:
         "orientation": os.getenv("ETSY_ORIENTATION", "vertical"),
         "pieces_included": os.getenv("ETSY_PIECES_INCLUDED", "1"),
         "currency_code": os.getenv("CURRENCY_CODE", "EUR"),
+        # Billing defaults (from prefs)
+        "billing_name": prefs.get("billing_name", ""),
+        "billing_address1": prefs.get("billing_address1", ""),
+        "billing_address2": prefs.get("billing_address2", ""),
+        "billing_city": prefs.get("billing_city", ""),
+        "billing_state": prefs.get("billing_state", ""),
+        "billing_zip": prefs.get("billing_zip", ""),
+        "billing_country": prefs.get("billing_country", ""),
+        "billing_tax_id": prefs.get("billing_tax_id", ""),
+        "billing_email": prefs.get("billing_email", ""),
     }
 
 
@@ -606,6 +675,179 @@ def get_shop_sales(shop_id: Optional[str] = None, page_limit: int = 100, max_pag
             "by_listing": {},
         }
 
+
+def get_shop_receipts(shop_id: Optional[str] = None, page_limit: int = 100, max_pages: int = 10) -> Dict[str, object]:
+    """Fetch detailed receipts with nested transactions for the shop.
+
+    Returns a JSON object with:
+      - ok: bool
+      - currency_code: str (best-effort)
+      - count: int (number of receipts returned)
+      - receipts: [
+          {
+            receipt_id,
+            order_date_ts,
+            buyer: { name, first_line, second_line, city, state, zip, country },
+            subtotal, shipping, discount, total,
+            transactions: [ { transaction_id, listing_id, title, sku, quantity, price, variation } ],
+            raw: <original receipt object>
+          }
+        ]
+    """
+    headers = get_auth_headers().copy()
+    sid = (shop_id or get_defaults().get("shop_id") or "").strip()
+    if not sid:
+        sid = ensure_shop_id()
+
+    currency_code = get_defaults().get("currency_code", "EUR")
+    receipts: List[Dict[str, object]] = []
+
+    def parse_money(m):
+        try:
+            if isinstance(m, dict):
+                amt = m.get("amount")
+                if isinstance(amt, (int, float)):
+                    return float(amt) / 100.0
+                # sometimes price can be nested as string
+                try:
+                    return float(str(m.get("price")))
+                except Exception:
+                    return 0.0
+            return float(str(m))
+        except Exception:
+            return 0.0
+
+    base_url = f"{ETSY_API_BASE}/shops/{sid}/receipts"
+    try:
+        offset = 0
+        for _ in range(max_pages):
+            params = {
+                "limit": max(1, min(int(page_limit or 100), 100)),
+                "offset": max(0, int(offset or 0)),
+            }
+            resp = requests.get(base_url, headers=headers, params=params, timeout=30)
+            if resp.status_code >= 400:
+                break
+            j = resp.json()
+            arr = _extract_array(j)
+            if not arr:
+                break
+
+            for r in arr:
+                try:
+                    rid = r.get("receipt_id") or r.get("receiptId") or r.get("id")
+
+                    # Try to capture a currency_code from any money field
+                    for mf in ("total_price", "subtotal", "shipping_cost", "discount_amt"):
+                        v = r.get(mf)
+                        if isinstance(v, dict):
+                            cc = v.get("currency_code") or v.get("currency")
+                            if isinstance(cc, str):
+                                currency_code = cc
+                                break
+
+                    buyer = {
+                        "name": r.get("name") or "",
+                        "first_line": r.get("first_line") or "",
+                        "second_line": r.get("second_line") or "",
+                        "city": r.get("city") or "",
+                        "state": r.get("state") or "",
+                        "zip": r.get("zip") or "",
+                        "country": r.get("country_name") or r.get("country_id") or "",
+                    }
+
+                    order_ts = r.get("created_timestamp") or r.get("create_timestamp") or r.get("creation_tsz") or r.get("create_time")
+                    try:
+                        order_ts = int(order_ts)
+                    except Exception:
+                        order_ts = None
+
+                    subtotal = parse_money(r.get("subtotal") or 0)
+                    shipping = parse_money(r.get("shipping_cost") or 0)
+                    discount = parse_money(r.get("discount_amt") or 0)
+                    total = parse_money(r.get("total_price") or 0)
+
+                    # Fetch nested transactions for this receipt (try multiple URL variants)
+                    txs: List[Dict[str, object]] = []
+                    tx_url_variants = [
+                        f"{ETSY_API_BASE}/shops/{sid}/receipts/{rid}/transactions",
+                        f"{ETSY_API_BASE}/receipts/{rid}/transactions",
+                    ]
+                    for tx_url in tx_url_variants:
+                        try:
+                            tx_resp = requests.get(tx_url, headers=headers, timeout=30)
+                            if tx_resp.status_code >= 400:
+                                continue
+                            tj = tx_resp.json()
+                            tx_arr = _extract_array(tj)
+                            for tx in tx_arr:
+                                price_val = 0.0
+                                p = tx.get("price")
+                                if isinstance(p, dict):
+                                    amt = p.get("amount")
+                                    if isinstance(amt, (int, float)):
+                                        price_val = float(amt) / 100.0
+                                    else:
+                                        try:
+                                            price_val = float(str(p.get("price")))
+                                        except Exception:
+                                            pass
+                                    cc2 = p.get("currency_code") or p.get("currency")
+                                    if isinstance(cc2, str):
+                                        currency_code = cc2
+                                else:
+                                    try:
+                                        price_val = float(str(tx.get("price") or 0))
+                                    except Exception:
+                                        price_val = 0.0
+                                txs.append(
+                                    {
+                                        "transaction_id": tx.get("transaction_id") or tx.get("id"),
+                                        "listing_id": tx.get("listing_id"),
+                                        "title": tx.get("title") or tx.get("listing_title"),
+                                        "sku": tx.get("sku") or "",
+                                        "quantity": int(tx.get("quantity") or 1),
+                                        "price": price_val,
+                                        "variation": tx.get("variations") or tx.get("product_attributes") or None,
+                                    }
+                                )
+                            break
+                        except Exception:
+                            continue
+
+                    receipts.append(
+                        {
+                            "receipt_id": rid,
+                            "order_date_ts": order_ts,
+                            "buyer": buyer,
+                            "subtotal": subtotal,
+                            "shipping": shipping,
+                            "discount": discount,
+                            "total": total,
+                            "transactions": txs,
+                            "raw": r,
+                        }
+                    )
+                except Exception:
+                    continue
+
+            if len(arr) < params["limit"]:
+                break
+            offset += params["limit"]
+
+        return {
+            "ok": True,
+            "currency_code": currency_code,
+            "count": len(receipts),
+            "receipts": receipts,
+        }
+    except Exception:
+        return {
+            "ok": False,
+            "currency_code": currency_code,
+            "count": 0,
+            "receipts": [],
+        }
 
 def get_my_shops() -> Dict[str, object]:
     """Fetch the list of shops for the authenticated user.

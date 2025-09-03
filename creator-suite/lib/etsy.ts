@@ -73,3 +73,93 @@ export async function etsyGetShopSales(params?: { limit?: number; max_pages?: nu
   }
   return r.json()
 }
+
+export type EtsyReceiptTransaction = {
+  transaction_id?: number | string
+  listing_id?: number | string
+  title?: string
+  sku?: string
+  quantity: number
+  price: number
+  variation?: any
+}
+
+export type EtsyBuyer = {
+  name?: string
+  first_line?: string
+  second_line?: string
+  city?: string
+  state?: string
+  zip?: string
+  country?: string
+}
+
+export type EtsyReceipt = {
+  receipt_id: number | string
+  order_date_ts?: number | null
+  buyer: EtsyBuyer
+  subtotal: number
+  shipping: number
+  discount: number
+  total: number
+  transactions: EtsyReceiptTransaction[]
+}
+
+export type EtsyReceiptsResponse = {
+  ok?: boolean
+  currency_code?: string
+  count?: number
+  receipts?: EtsyReceipt[]
+  detail?: string
+}
+
+export async function etsyGetShopReceipts(params?: { limit?: number; max_pages?: number }): Promise<EtsyReceiptsResponse> {
+  const sp = new URLSearchParams()
+  if (typeof params?.limit === 'number') sp.set('limit', String(params.limit))
+  if (typeof params?.max_pages === 'number') sp.set('max_pages', String(params.max_pages))
+  const qs = sp.toString()
+  const url = `/api/etsy/shop/receipts${qs ? `?${qs}` : ''}`
+  const r = await fetch(url, { cache: 'no-store' })
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({} as any))
+    return { ok: false, detail: (j as any)?.detail }
+  }
+  return r.json()
+}
+
+// Preferences (including billing fields)
+export type EtsyPrefs = {
+  shop_id: string
+  taxonomy_id: string
+  billing_name?: string
+  billing_address1?: string
+  billing_address2?: string
+  billing_city?: string
+  billing_state?: string
+  billing_zip?: string
+  billing_country?: string
+  billing_tax_id?: string
+  billing_email?: string
+}
+
+export async function etsyGetPrefs(): Promise<EtsyPrefs> {
+  const r = await fetch('/api/etsy/prefs', { cache: 'no-store' })
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}))
+    throw new Error((j as any)?.detail || 'Failed to fetch Etsy prefs')
+  }
+  return r.json()
+}
+
+export async function etsySetPrefs(p: Partial<EtsyPrefs>): Promise<EtsyPrefs> {
+  const r = await fetch('/api/etsy/prefs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(p ?? {}),
+  })
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}))
+    throw new Error((j as any)?.detail || 'Failed to save Etsy prefs')
+  }
+  return r.json()
+}
